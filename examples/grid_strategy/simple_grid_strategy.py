@@ -261,7 +261,13 @@ async def run_strategy(cfg: GridConfig) -> None:
     if file_cfg.get("leverage") is not None:
         cfg.leverage = int(file_cfg["leverage"])
 
-    api_client = lighter.ApiClient(configuration=lighter.Configuration(host=base_url))
+    # Setup API client with authentication
+    configuration = lighter.Configuration(host=base_url)
+    # Use the first available API key for OrderApi authentication
+    first_api_key_index = min(private_keys.keys())
+    configuration.api_key = {"default": private_keys[first_api_key_index]}
+    api_client = lighter.ApiClient(configuration=configuration)
+
     client = lighter.SignerClient(
         url=base_url,
         account_index=account_index,
