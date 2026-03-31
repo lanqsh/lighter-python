@@ -137,11 +137,14 @@ def size_to_wire(size: float, size_decimals: int) -> int:
 
 
 def build_grid_prices(anchor_price: float, levels: int, price_step: float) -> List[Tuple[float, float]]:
+    # Align anchor price to price_step multiples (round down to nearest multiple)
+    aligned_anchor = (int(anchor_price / price_step)) * price_step
+
     rows: List[Tuple[float, float]] = []
     for level in range(1, levels + 1):
         diff = price_step * level
-        buy_price = anchor_price - diff
-        sell_price = anchor_price + diff
+        buy_price = aligned_anchor - diff
+        sell_price = aligned_anchor + diff
         if buy_price <= 0:
             continue
         rows.append((buy_price, sell_price))
@@ -334,6 +337,11 @@ async def run_strategy(cfg: GridConfig) -> None:
                 )
 
         print(f"start symbol={symbol} market_id={cfg.market_id} anchor={anchor_price:.6f} leverage={cfg.leverage}x dry_run={cfg.dry_run}")
+
+        # Calculate aligned anchor price for display
+        aligned_anchor = (int(anchor_price / cfg.price_step)) * cfg.price_step
+        if abs(aligned_anchor - anchor_price) > 0.01:
+            print(f"      aligned anchor={aligned_anchor:.6f} (from {anchor_price:.6f} with priceStep={cfg.price_step})")
         print(
             f"grid mode=long+short levels={cfg.levels} price_step={cfg.price_step} "
             f"rebalance_threshold={cfg.rebalance_threshold} base_amount={effective_base_amount}"
@@ -366,7 +374,8 @@ async def run_strategy(cfg: GridConfig) -> None:
             print("rebalance: cancel old grid and place new grid")
             await cancel_orders(client, active_order_ids, cfg.market_id, cfg.dry_run)
 
-            anchor_price = current_price
+            # Align new anchor price to price_step multiples
+            anchor_price = (int(current_price / cfg.price_step)) * cfg.price_step
             active_order_ids, next_order_index = await place_grid(
                 client=client,
                 market_id=cfg.market_id,
