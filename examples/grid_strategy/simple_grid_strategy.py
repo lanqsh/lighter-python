@@ -389,12 +389,20 @@ async def run_strategy(cfg: GridConfig) -> None:
             )
 
     finally:
-        print("cleanup: cancel active strategy orders")
+        print("\ncleanup: cancel active strategy orders")
         try:
             await cancel_orders(client, active_order_ids, cfg.market_id, cfg.dry_run)
+        except Exception as e:
+            print(f"Error during cancel_orders cleanup: {e}")
         finally:
-            await client.close()
-            await api_client.close()
+            try:
+                await client.close()
+            except Exception as e:
+                print(f"Error closing SignerClient: {e}")
+            try:
+                await api_client.close()
+            except Exception as e:
+                print(f"Error closing ApiClient: {e}")
 
 
 def read_strategy_overrides(config_file: str) -> Dict[str, Any]:
@@ -415,4 +423,11 @@ def read_strategy_overrides(config_file: str) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    asyncio.run(run_strategy(parse_args()))
+    try:
+        asyncio.run(run_strategy(parse_args()))
+    except KeyboardInterrupt:
+        print("\nShutdown signal received (Ctrl+C). Exiting gracefully...")
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
