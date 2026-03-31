@@ -636,7 +636,7 @@ async def run_strategy(cfg: GridConfig) -> None:
         # 设置杠杆
         if cfg.leverage > 1:
             print(f"Setting leverage to {cfg.leverage}x ...")
-            _, err = await client.update_leverage(
+            _, __, err = await client.update_leverage(
                 market_index=cfg.market_id, margin_mode=1, leverage=cfg.leverage)
             if err:
                 print(f"[warn] set leverage failed: {err}")
