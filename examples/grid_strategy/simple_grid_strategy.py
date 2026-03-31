@@ -152,19 +152,20 @@ async def cancel_all_market_orders(
     dry_run: bool,
     api_key: str,
 ) -> List[int]:
-    orders_response = await order_api.account_active_orders(
-        account_index=account_index,
-        market_id=market_id,
-        authorization=api_key
-    )
-    order_indexes = [o.order_index for o in orders_response.orders]
+    print(f"DEBUG: cancel_all_market_orders - api_key length={len(api_key)}, first 20 chars={api_key[:20]}...")
+    print(f"DEBUG: Calling account_active_orders with authorization header")
 
-    if not order_indexes:
-        print(f"startup clear: no active orders for market_id={market_id}")
-        return []
+    try:
+        orders_response = await order_api.account_active_orders(
+            account_index=account_index,
+            market_id=market_id,
+            authorization=api_key
+        )
+    except Exception as e:
+        print(f"DEBUG: account_active_orders failed with error: {e}")
+        print(f"DEBUG: authorization param was: {api_key[:20]}...")
+        raise
 
-    print(f"startup clear: found {len(order_indexes)} active orders for market_id={market_id}")
-    await cancel_orders(client, order_indexes, market_id, dry_run)
     return order_indexes
 
 
@@ -270,7 +271,10 @@ async def run_strategy(cfg: GridConfig) -> None:
     configuration = lighter.Configuration(host=base_url)
     # Use the first available API key for OrderApi authentication
     first_api_key_index = min(private_keys.keys())
-    configuration.api_key = {"default": private_keys[first_api_key_index]}
+    first_api_key_value = private_keys[first_api_key_index]
+    print(f"DEBUG: Configuring ApiClient with API key index={first_api_key_index}")
+    print(f"DEBUG: API key length={len(first_api_key_value)}, first 20 chars={first_api_key_value[:20]}...")
+    configuration.api_key = {"default": first_api_key_value}
     api_client = lighter.ApiClient(configuration=configuration)
 
     client = lighter.SignerClient(
@@ -317,6 +321,8 @@ async def run_strategy(cfg: GridConfig) -> None:
         if cfg.clear_on_start:
             # Get the first API key for authorization
             first_api_key = private_keys[min(private_keys.keys())]
+            print(f"DEBUG: Using API key index {min(private_keys.keys())} for cancel_all_market_orders")
+            print(f"DEBUG: First API key length={len(first_api_key)}, first 20 chars={first_api_key[:20]}...")
             await cancel_all_market_orders(
                 client=client,
                 order_api=order_api,
