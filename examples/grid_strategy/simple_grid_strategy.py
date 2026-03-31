@@ -318,7 +318,7 @@ async def run_strategy(cfg: GridConfig) -> None:
         min_base_amount = float(market_detail.min_base_amount)
         effective_base_amount = cfg.base_amount
         if effective_base_amount <= 0:
-            effective_base_amount = size_to_wire(min_base_amount, size_decimals)
+            effective_base_amount = max(1, size_to_wire(min_base_amount, size_decimals))
         if file_cfg.get("baseAmount") is not None:
             effective_base_amount = int(file_cfg["baseAmount"])
         if cfg.clear_on_start:
@@ -389,20 +389,15 @@ async def run_strategy(cfg: GridConfig) -> None:
             )
 
     finally:
-        print("\ncleanup: cancel active strategy orders")
+        print("\ncleanup: keeping active strategy orders (no cancellation on exit)")
         try:
-            await cancel_orders(client, active_order_ids, cfg.market_id, cfg.dry_run)
+            await client.close()
         except Exception as e:
-            print(f"Error during cancel_orders cleanup: {e}")
-        finally:
-            try:
-                await client.close()
-            except Exception as e:
-                print(f"Error closing SignerClient: {e}")
-            try:
-                await api_client.close()
-            except Exception as e:
-                print(f"Error closing ApiClient: {e}")
+            print(f"Error closing SignerClient: {e}")
+        try:
+            await api_client.close()
+        except Exception as e:
+            print(f"Error closing ApiClient: {e}")
 
 
 def read_strategy_overrides(config_file: str) -> Dict[str, Any]:
