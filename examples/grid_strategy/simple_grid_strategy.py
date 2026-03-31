@@ -44,7 +44,7 @@ def parse_args() -> GridConfig:
     parser.add_argument("--poll-interval-sec", type=float, default=5.0, help="Seconds between strategy checks.")
     parser.add_argument("--max-cycles", type=int, default=200, help="Max loop iterations before graceful stop.")
     parser.add_argument("--start-order-index", type=int, default=100000, help="Starting order index used by strategy.")
-    parser.add_argument("--config-file", type=str, default="", help="Path to api_key_config.json. If empty, auto-detect.")
+    parser.add_argument("--config-file", type=str, default="", help="Optional: Path to api_key_config.json. If empty, auto-searches in: ./api_key_config.json, ../api_key_config.json, ../../api_key_config.json")
     parser.add_argument("--dry-run", action="store_true", help="Print actions but do not send create/cancel orders.")
 
     args = parser.parse_args()
@@ -85,7 +85,11 @@ def load_api_key_config(config_file: str) -> Tuple[str, int, Dict[int, str]]:
 
     if config_path is None:
         raise FileNotFoundError(
-            "api_key_config.json not found. Pass --config-file or place it in current dir/examples/repo root."
+            "api_key_config.json not found in: "
+            f"1. {Path.cwd() / 'api_key_config.json'}\n"
+            f"2. {EXAMPLES_DIR / 'api_key_config.json'}\n"
+            f"3. {ROOT_DIR / 'api_key_config.json'}\n"
+            "Place config file in one of above locations or use --config-file to specify path."
         )
 
     with config_path.open("r", encoding="utf-8") as f:
@@ -152,34 +156,20 @@ async def cancel_all_market_orders(
     dry_run: bool,
     api_key: str,
 ) -> List[int]:
-    print(f"DEBUG: cancel_all_market_orders - api_key length={len(api_key)}, first 20 chars={api_key[:20]}...")
-    print(f"DEBUG: Calling account_active_orders with authorization header")
+    orders_response = await order_api.account_active_orders(
+        account_index=account_index,
+        market_id=market_id,
+        auth=api_key
+    )
+    order_indexes = [o.order_index for o in orders_response.orders]
 
-    try:
-        orders_response = await order_api.account_active_orders(
-            account_index=account_index,
-            market_id=market_id,
-            auth=api_key
-        )
-    except Exception as e:
-        print(f"DEBUG: account_active_orders failed with error: {e}")
-        print(f"DEBUG: authorization param was: {api_key[:20]}...")
-        raise
+    if not order_indexes:
+        print(f"startup clear: no active orders for market_id={market_id}")
+        return []
 
+    print(f"startup clear: found {len(order_indexes)} active orders for market_id={market_id}")
+    await cancel_orders(client, order_indexes, market_id, dry_run)
     return order_indexes
-
-
-async def cancel_orders(client: lighter.SignerClient, order_ids: List[int], market_id: int, dry_run: bool) -> None:
-    if not order_ids:
-        return
-
-    for order_id in order_ids:
-        if dry_run:
-            print(f"[DRY RUN] cancel order_index={order_id}")
-            continue
-
-        _, tx_hash, err = await client.cancel_order(market_index=market_id, order_index=order_id)
-        print(f"cancel order_index={order_id} tx_hash={tx_hash} err={err}")
 
 
 async def place_grid(
@@ -269,11 +259,8 @@ async def run_strategy(cfg: GridConfig) -> None:
 
     # Setup API client with authentication
     configuration = lighter.Configuration(host=base_url)
-    # Use the first available API key for OrderApi authentication
     first_api_key_index = min(private_keys.keys())
     first_api_key_value = private_keys[first_api_key_index]
-    print(f"DEBUG: Configuring ApiClient with API key index={first_api_key_index}")
-    print(f"DEBUG: API key length={len(first_api_key_value)}, first 20 chars={first_api_key_value[:20]}...")
     configuration.api_key = {"default": first_api_key_value}
     api_client = lighter.ApiClient(configuration=configuration)
 
@@ -320,12 +307,10 @@ async def run_strategy(cfg: GridConfig) -> None:
             effective_base_amount = int(file_cfg["baseAmount"])
         if cfg.clear_on_start:
             # Generate auth token for read-only operations
-            print(f"DEBUG: Generating auth token for read-only operations...")
             auth_token, err = client.create_auth_token_with_expiry(deadline=600)  # 10 minutes
             if err is not None:
                 print(f"Warning: Failed to create auth token: {err}, skipping cancel_all_market_orders")
             else:
-                print(f"DEBUG: Auth token generated successfully, length={len(auth_token)}")
                 await cancel_all_market_orders(
                     client=client,
                     order_api=order_api,
