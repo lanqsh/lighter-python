@@ -647,22 +647,48 @@ async def run_strategy(cfg: GridConfig) -> None:
 
         # ── 市场信息 ─────────────────────────────────────
         # PerpsOrderBookDetail 关键字段：
-        #   last_trade_price:        Union[float, int]  已是人类可读价格，直接 float() 即可
-        #   min_base_amount:         StrictStr          小数字符串如 "0.001"，需 size_to_wire 换算
+        #   last_trade_price:         Union[float,int]  已是人类可读价格，直接 float()
+        #   min_base_amount:          StrictStr         小数字符串如 "0.001"
+        #   min_quote_amount:         StrictStr         最小 quote 金额，字符串
         #   supported_price_decimals: int               wire 价格小数位数
         #   supported_size_decimals:  int               wire 数量小数位数
+        #   quote_multiplier:         int               quote wire 换算倍数
         market_detail  = await fetch_market_detail(order_api, cfg.market_id)
         symbol         = market_detail.symbol
         price_decimals = int(market_detail.supported_price_decimals)
         size_decimals  = int(market_detail.supported_size_decimals)
-        # last_trade_price 已是 float/int 人类可读价格，无需换算
         current_price  = float(market_detail.last_trade_price)
-        # min_base_amount 是小数字符串（如 "0.001"），需通过 size_to_wire 转为 wire 整数
-        min_base_amount = float(str(market_detail.min_base_amount))
+        min_base_amount  = float(str(market_detail.min_base_amount))
+        min_quote_amount = float(str(market_detail.min_quote_amount))
+        quote_multiplier = int(market_detail.quote_multiplier)
+
+        # 打印完整市场信息，方便诊断下单失败问题
+        print(
+            f"[market] symbol={symbol}  market_id={cfg.market_id}\n"
+            f"         price_decimals={price_decimals}  size_decimals={size_decimals}"
+            f"  quote_multiplier={quote_multiplier}\n"
+            f"         min_base_amount={min_base_amount}  min_quote_amount={min_quote_amount}"
+            f"  last_price={current_price}"
+        )
 
         base_amount = cfg.base_amount
         if base_amount <= 0:
+            # 先满足 min_base_amount
             base_amount = max(1, size_to_wire(min_base_amount, size_decimals))
+            # 再检查对应的 quote_amount 是否满足 min_quote_amount
+            # quote_wire = base_amount * price_wire / quote_multiplier
+            # 这里用当前价估算（price_wire = price * 10^price_decimals）
+            price_wire_now  = price_to_wire(current_price, price_decimals)
+            quote_wire      = base_amount * price_wire_now // quote_multiplier
+            min_quote_wire  = int(round(min_quote_amount * (10 ** price_decimals)))
+            if quote_wire < min_quote_wire and price_wire_now > 0:
+                # 向上调整 base_amount 直到 quote_wire >= min_quote_wire
+                base_amount = (min_quote_wire * quote_multiplier + price_wire_now - 1) // price_wire_now
+            print(
+                f"[base_amount] auto={base_amount}  "
+                f"quote_wire_est={base_amount * price_wire_now // quote_multiplier}  "
+                f"min_quote_wire={min_quote_wire}"
+            )
 
         # ── Auth token ───────────────────────────────────
         auth_mgr = AuthTokenManager(client, ttl_sec=3600)
