@@ -319,18 +319,21 @@ async def run_strategy(cfg: GridConfig) -> None:
         if file_cfg.get("baseAmount") is not None:
             effective_base_amount = int(file_cfg["baseAmount"])
         if cfg.clear_on_start:
-            # Get the first API key for authorization
-            first_api_key = private_keys[min(private_keys.keys())]
-            print(f"DEBUG: Using API key index {min(private_keys.keys())} for cancel_all_market_orders")
-            print(f"DEBUG: First API key length={len(first_api_key)}, first 20 chars={first_api_key[:20]}...")
-            await cancel_all_market_orders(
-                client=client,
-                order_api=order_api,
-                account_index=account_index,
-                market_id=cfg.market_id,
-                dry_run=cfg.dry_run,
-                api_key=first_api_key,
-            )
+            # Generate auth token for read-only operations
+            print(f"DEBUG: Generating auth token for read-only operations...")
+            auth_token, err = client.create_auth_token_with_expiry(deadline=600)  # 10 minutes
+            if err is not None:
+                print(f"Warning: Failed to create auth token: {err}, skipping cancel_all_market_orders")
+            else:
+                print(f"DEBUG: Auth token generated successfully, length={len(auth_token)}")
+                await cancel_all_market_orders(
+                    client=client,
+                    order_api=order_api,
+                    account_index=account_index,
+                    market_id=cfg.market_id,
+                    dry_run=cfg.dry_run,
+                    api_key=auth_token,
+                )
 
         print(f"start symbol={symbol} market_id={cfg.market_id} anchor={anchor_price:.6f} leverage={cfg.leverage}x dry_run={cfg.dry_run}")
         print(
