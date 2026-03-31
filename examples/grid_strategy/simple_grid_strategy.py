@@ -148,6 +148,19 @@ def build_grid_prices(anchor_price: float, levels: int, price_step: float) -> Li
     return rows
 
 
+async def cancel_orders(client: lighter.SignerClient, order_ids: List[int], market_id: int, dry_run: bool) -> None:
+    if not order_ids:
+        return
+
+    for order_id in order_ids:
+        if dry_run:
+            print(f"[DRY RUN] cancel order_index={order_id}")
+            continue
+
+        _, tx_hash, err = await client.cancel_order(market_index=market_id, order_index=order_id)
+        print(f"cancel order_index={order_id} tx_hash={tx_hash} err={err}")
+
+
 async def cancel_all_market_orders(
     client: lighter.SignerClient,
     order_api: lighter.OrderApi,
