@@ -394,9 +394,10 @@ async def do_place_order(
     dry_run:     bool,
     label:       str,
 ) -> bool:
+    print(f"[order] {label}  coi={order_idx}  market={market_id}  "
+          f"base_amount={base_amount}  price_wire={wire_price}  "
+          f"is_ask={is_ask}  reduce_only={reduce_only}")
     if dry_run:
-        print(f"[DRY] {label}  coi={order_idx}  price_wire={wire_price}  "
-              f"is_ask={is_ask}  reduce={reduce_only}")
         return True
     _, tx_hash, err = await client.create_order(
         market_index=market_id,
@@ -412,7 +413,7 @@ async def do_place_order(
     if err is not None:
         print(f"[warn] {label} FAILED  coi={order_idx}  err={err}")
         return False
-    print(f"{label}  coi={order_idx}  tx={tx_hash}")
+    print(f"[ok]   {label}  coi={order_idx}  tx={tx_hash}")
     return True
 
 
