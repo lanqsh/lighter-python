@@ -1,0 +1,15 @@
+{
+  "baseUrl": "https://mainnet.zklighter.elliot.ai",
+  "accountIndex": 123,
+  "privateKeys": {
+    "0": "0xyour_api_private_key_hex"
+  },
+  "grid": {
+    "marketId": 0,
+    "levels": 4,
+    "priceStep": 5,
+    "rebalanceThreshold": 10,
+    "baseAmount": 0,
+    "clearOnStart": true
+  }
+}
