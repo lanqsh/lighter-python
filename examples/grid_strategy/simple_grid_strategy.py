@@ -150,8 +150,13 @@ async def cancel_all_market_orders(
     account_index: int,
     market_id: int,
     dry_run: bool,
+    api_key: str,
 ) -> List[int]:
-    orders_response = await order_api.account_active_orders(account_index=account_index, market_id=market_id)
+    orders_response = await order_api.account_active_orders(
+        account_index=account_index,
+        market_id=market_id,
+        authorization=api_key
+    )
     order_indexes = [o.order_index for o in orders_response.orders]
 
     if not order_indexes:
@@ -310,12 +315,15 @@ async def run_strategy(cfg: GridConfig) -> None:
         if file_cfg.get("baseAmount") is not None:
             effective_base_amount = int(file_cfg["baseAmount"])
         if cfg.clear_on_start:
+            # Get the first API key for authorization
+            first_api_key = private_keys[min(private_keys.keys())]
             await cancel_all_market_orders(
                 client=client,
                 order_api=order_api,
                 account_index=account_index,
                 market_id=cfg.market_id,
                 dry_run=cfg.dry_run,
+                api_key=first_api_key,
             )
 
         print(f"start symbol={symbol} market_id={cfg.market_id} anchor={anchor_price:.6f} leverage={cfg.leverage}x dry_run={cfg.dry_run}")
