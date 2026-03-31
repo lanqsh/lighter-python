@@ -184,26 +184,19 @@ def parse_args() -> GridConfig:
 # ════════════════════════════════════════════════════════════
 #  共用工具函数
 # ════════════════════════════════════════════════════════════
-def load_api_key_config(config_file: str) -> Tuple[str, int, Dict[int, str]]:
-    candidates: List[Path] = []
-    if config_file:
-        candidates.append(Path(config_file).expanduser().resolve())
-    candidates.append(Path.cwd() / "api_key_config.json")
-    candidates.append(EXAMPLES_DIR / "api_key_config.json")
-    candidates.append(ROOT_DIR / "api_key_config.json")
-    for c in candidates:
-        if c.exists():
-            with c.open("r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            private_keys = {int(k): v for k, v in cfg["privateKeys"].items()}
-            return cfg["baseUrl"], int(cfg["accountIndex"]), private_keys
-    raise FileNotFoundError("api_key_config.json not found")
+def load_api_key_config(config_file: str) -> Tuple[str, int, Dict[int, str], str]:
+    p = Path("api_key_config.json").resolve()
+    with p.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    private_keys = {int(k): v for k, v in cfg["privateKeys"].items()}
+    return cfg["baseUrl"], int(cfg["accountIndex"]), private_keys, str(p)
 
 
-def read_strategy_overrides(config_file: str) -> Dict[str, Any]:
-    if not config_file:
+def read_strategy_overrides(resolved_config_file: str) -> Dict[str, Any]:
+    """读取 api_key_config.json 中的 grid 配置段。resolved_config_file 必须是已解析的绝对路径。"""
+    if not resolved_config_file:
         return {}
-    p = Path(config_file).expanduser().resolve()
+    p = Path(resolved_config_file)
     if not p.exists():
         return {}
     with p.open("r", encoding="utf-8") as f:
@@ -233,12 +226,8 @@ def size_to_wire(size: float, size_decimals: int) -> int:
 
 
 def state_file_path(config_file: str, market_id: int) -> Path:
-    """状态文件路径：与配置文件同目录，或 cwd"""
-    if config_file:
-        base = Path(config_file).expanduser().resolve().parent
-    else:
-        base = Path.cwd()
-    return base / f"grid_state_market{market_id}.json"
+    """状态文件路径：固定存放在当前工作目录"""
+    return Path.cwd() / f"grid_state_market{market_id}.json"
 
 
 # ════════════════════════════════════════════════════════════
@@ -602,8 +591,9 @@ async def run_strategy(cfg: GridConfig) -> None:
     if cfg.price_step <= 0:
         raise ValueError("price-step must be > 0")
 
-    base_url, account_index, private_keys = load_api_key_config(cfg.config_file)
-    file_cfg = read_strategy_overrides(cfg.config_file)
+    base_url, account_index, private_keys, resolved_cfg_path = load_api_key_config(cfg.config_file)
+    print(f"[config] using: {resolved_cfg_path}")
+    file_cfg = read_strategy_overrides(resolved_cfg_path)
 
     # 从配置文件覆盖参数
     for attr, key, conv in [
@@ -615,6 +605,14 @@ async def run_strategy(cfg: GridConfig) -> None:
     ]:
         if file_cfg.get(key) is not None:
             setattr(cfg, attr, conv(file_cfg[key]))
+
+    print(
+        f"[config] market_id={cfg.market_id}  levels={cfg.levels}  "
+        f"price_step={cfg.price_step}  leverage={cfg.leverage}x  "
+        f"base_amount={cfg.base_amount}  poll_interval={cfg.poll_interval_sec}s  "
+        f"max_cycles={cfg.max_cycles}  start_order_index={cfg.start_order_index}  "
+        f"dry_run={cfg.dry_run}"
+    )
 
     # ── SDK 初始化 ───────────────────────────────────────
     configuration = lighter.Configuration(host=base_url)
