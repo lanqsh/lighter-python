@@ -29,6 +29,7 @@ class GridConfig:
     start_order_index: int
     dry_run: bool
     config_file: str
+    leverage: int = 1
 
 
 def parse_args() -> GridConfig:
@@ -257,6 +258,8 @@ async def run_strategy(cfg: GridConfig) -> None:
         cfg.rebalance_threshold = float(file_cfg["rebalanceThreshold"])
     if file_cfg.get("clearOnStart") is not None:
         cfg.clear_on_start = bool(file_cfg["clearOnStart"])
+    if file_cfg.get("leverage") is not None:
+        cfg.leverage = int(file_cfg["leverage"])
 
     api_client = lighter.ApiClient(configuration=lighter.Configuration(host=base_url))
     client = lighter.SignerClient(
@@ -274,6 +277,20 @@ async def run_strategy(cfg: GridConfig) -> None:
         err = client.check_client()
         if err is not None:
             raise RuntimeError(f"check_client failed: {err}")
+
+        # Set leverage if configured
+        if cfg.leverage > 1:
+            print(f"Setting leverage to {cfg.leverage}x for market {cfg.market_id}...")
+            margin_mode = 1  # 1 = cross margin, 0 = isolated margin
+            _, err = await client.update_leverage(
+                market_index=cfg.market_id,
+                margin_mode=margin_mode,
+                leverage=cfg.leverage,
+            )
+            if err is not None:
+                print(f"Warning: Failed to set leverage: {err}")
+            else:
+                print(f"Leverage set to {cfg.leverage}x successfully")
 
         market_detail = await fetch_market_detail(order_api, cfg.market_id)
         symbol = market_detail.symbol
@@ -295,7 +312,7 @@ async def run_strategy(cfg: GridConfig) -> None:
                 dry_run=cfg.dry_run,
             )
 
-        print(f"start symbol={symbol} market_id={cfg.market_id} anchor={anchor_price:.6f} dry_run={cfg.dry_run}")
+        print(f"start symbol={symbol} market_id={cfg.market_id} anchor={anchor_price:.6f} leverage={cfg.leverage}x dry_run={cfg.dry_run}")
         print(
             f"grid mode=long+short levels={cfg.levels} price_step={cfg.price_step} "
             f"rebalance_threshold={cfg.rebalance_threshold} base_amount={effective_base_amount}"

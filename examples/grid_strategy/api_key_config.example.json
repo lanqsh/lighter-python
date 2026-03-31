@@ -10,6 +10,7 @@
     "priceStep": 5,
     "rebalanceThreshold": 10,
     "baseAmount": 0,
-    "clearOnStart": true
+    "clearOnStart": true,
+    "leverage": 1
   }
 }
