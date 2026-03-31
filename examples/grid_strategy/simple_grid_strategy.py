@@ -159,7 +159,7 @@ async def cancel_all_market_orders(
         orders_response = await order_api.account_active_orders(
             account_index=account_index,
             market_id=market_id,
-            authorization=api_key
+            auth=api_key
         )
     except Exception as e:
         print(f"DEBUG: account_active_orders failed with error: {e}")
