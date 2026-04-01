@@ -1218,9 +1218,12 @@ async def run_strategy(cfg: GridConfig) -> None:
                     cfg.leverage,
                 )
 
-            LOGGER.info("Setting leverage to %sx ...", cfg.leverage)
+            LOGGER.info("Setting leverage to %sx (margin_mode=cross) ...", cfg.leverage)
             tx_info, api_response, err = await client.update_leverage(
-                market_index=cfg.market_id, margin_mode=1, leverage=cfg.leverage)
+                market_index=cfg.market_id,
+                margin_mode=client.CROSS_MARGIN_MODE,
+                leverage=cfg.leverage,
+            )
             if err:
                 LOGGER.warning("set leverage failed: %s", err)
             else:
