@@ -1014,6 +1014,30 @@ async def run_one_cycle(
             slot_kind="tp",
         )
         if not evidence_confirms_tp_fill(slot, evidence):
+            # 再检查一次：若当前仓位已经为 0，说明仓位确实已关闭
+            # （reduce_only 单因无仓位被交易所自动取消，或上一轮成交未被捕获）
+            # → 重置 IDLE，不计入成功 TP（保守处理，避免格子永久卡住）
+            current_position = position_size_signed(evidence.position_after)
+            if current_position == 0.0:
+                LOGGER.warning(
+                    "[tp:no-evidence-but-zero-position] side=%s tp_price=%.4f coi=%s "
+                    "position=0 → resetting slot to IDLE (not counted as successful TP)",
+                    "LONG" if slot.is_long else "SHORT",
+                    slot.tp_price,
+                    slot.tp_order_idx,
+                )
+                record_order_lifecycle(
+                    monitor,
+                    slot.tp_order_idx,
+                    f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+                    "reset-idle-zero-position",
+                    slot.is_long,
+                    True,
+                    slot=slot,
+                    slot_kind="tp",
+                )
+                slot.status = SLOT_IDLE
+                continue
             LOGGER.warning(
                 "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
                 "LONG" if slot.is_long else "SHORT",
