@@ -414,6 +414,59 @@ def size_to_wire(size: float, size_decimals: int) -> int:
     return int(round(size * (10 ** size_decimals)))
 
 
+def ceil_div(numerator: int, denominator: int) -> int:
+    if denominator <= 0:
+        raise ValueError("denominator must be > 0")
+    return (numerator + denominator - 1) // denominator
+
+
+def build_entry_prices_for_side(current_price: float, cfg: "GridConfig") -> List[float]:
+    aligned = (int(current_price / cfg.price_step)) * cfg.price_step
+    prices: List[float] = []
+    if cfg.side == SIDE_LONG:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned - cfg.price_step * i
+            if place_price <= 0 or place_price >= current_price:
+                continue
+            prices.append(place_price)
+    else:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned + cfg.price_step * i
+            if place_price <= current_price:
+                continue
+            prices.append(place_price)
+    return prices
+
+
+def resolve_effective_base_amount(
+    configured_base_amount: int,
+    current_price: float,
+    cfg: "GridConfig",
+    min_base_amount: float,
+    min_quote_amount: float,
+    price_decimals: int,
+    size_decimals: int,
+    quote_multiplier: int,
+) -> Tuple[int, int, int, Optional[float]]:
+    min_base_wire = max(1, size_to_wire(min_base_amount, size_decimals))
+    min_quote_wire = int(round(min_quote_amount * (10 ** price_decimals)))
+    entry_prices = build_entry_prices_for_side(current_price, cfg)
+
+    required_base = min_base_wire
+    min_entry_price: Optional[float] = min(entry_prices) if entry_prices else None
+    for place_price in entry_prices:
+        price_wire = price_to_wire(place_price, price_decimals)
+        if price_wire <= 0:
+            continue
+        # quote_wire = base_amount * price_wire / quote_multiplier
+        # => base_amount >= ceil(min_quote_wire * quote_multiplier / price_wire)
+        required_by_quote = ceil_div(min_quote_wire * quote_multiplier, price_wire)
+        required_base = max(required_base, required_by_quote)
+
+    effective_base = required_base if configured_base_amount <= 0 else max(configured_base_amount, required_base)
+    return effective_base, required_base, len(entry_prices), min_entry_price
+
+
 def state_file_path(config_file: str, market_id: int, side: str) -> Path:
     """状态文件路径：固定存放在当前工作目录，并按方向隔离。"""
     return Path.cwd() / f"grid_state_market{market_id}_{side}.json"
@@ -1176,24 +1229,44 @@ async def run_strategy(cfg: GridConfig) -> None:
             LOGGER.warning("Configured leverage=%s is invalid; fallback to 1x.", cfg.leverage)
             cfg.leverage = 1
 
-        base_amount = cfg.base_amount
-        if base_amount <= 0:
-            # 先满足 min_base_amount
-            base_amount = max(1, size_to_wire(min_base_amount, size_decimals))
-            # 再检查对应的 quote_amount 是否满足 min_quote_amount
-            # quote_wire = base_amount * price_wire / quote_multiplier
-            # 这里用当前价估算（price_wire = price * 10^price_decimals）
-            price_wire_now  = price_to_wire(current_price, price_decimals)
-            quote_wire      = base_amount * price_wire_now // quote_multiplier
-            min_quote_wire  = int(round(min_quote_amount * (10 ** price_decimals)))
-            if quote_wire < min_quote_wire and price_wire_now > 0:
-                # 向上调整 base_amount 直到 quote_wire >= min_quote_wire
-                base_amount = (min_quote_wire * quote_multiplier + price_wire_now - 1) // price_wire_now
+        base_amount, required_base_amount, entry_count, min_entry_price = resolve_effective_base_amount(
+            configured_base_amount=cfg.base_amount,
+            current_price=current_price,
+            cfg=cfg,
+            min_base_amount=min_base_amount,
+            min_quote_amount=min_quote_amount,
+            price_decimals=price_decimals,
+            size_decimals=size_decimals,
+            quote_multiplier=quote_multiplier,
+        )
+        min_entry_text = f"{min_entry_price:.6f}" if min_entry_price is not None else "n/a"
+        if cfg.base_amount <= 0:
             LOGGER.info(
-                "[base_amount] auto=%s quote_wire_est=%s min_quote_wire=%s",
+                "[base_amount] auto=%s required=%s side=%s entry_count=%s min_entry=%s",
                 base_amount,
-                base_amount * price_wire_now // quote_multiplier,
-                min_quote_wire,
+                required_base_amount,
+                cfg.side,
+                entry_count,
+                min_entry_text,
+            )
+        elif cfg.base_amount < required_base_amount:
+            LOGGER.warning(
+                "[base_amount] configured=%s too small for deepest grid price; using auto=%s required=%s side=%s entry_count=%s min_entry=%s",
+                cfg.base_amount,
+                base_amount,
+                required_base_amount,
+                cfg.side,
+                entry_count,
+                min_entry_text,
+            )
+        else:
+            LOGGER.info(
+                "[base_amount] configured=%s accepted required=%s side=%s entry_count=%s min_entry=%s",
+                cfg.base_amount,
+                required_base_amount,
+                cfg.side,
+                entry_count,
+                min_entry_text,
             )
 
         # ── Auth token ───────────────────────────────────
@@ -1243,6 +1316,29 @@ async def run_strategy(cfg: GridConfig) -> None:
 
             LOGGER.info("cycle=%s price=%.4f %s", cycle, current_price, state.summary())
 
+            cycle_base_amount, cycle_required_base, cycle_entry_count, cycle_min_entry = resolve_effective_base_amount(
+                configured_base_amount=cfg.base_amount,
+                current_price=current_price,
+                cfg=cfg,
+                min_base_amount=min_base_amount,
+                min_quote_amount=min_quote_amount,
+                price_decimals=price_decimals,
+                size_decimals=size_decimals,
+                quote_multiplier=quote_multiplier,
+            )
+            if cycle_base_amount != base_amount:
+                cycle_min_entry_text = f"{cycle_min_entry:.6f}" if cycle_min_entry is not None else "n/a"
+                LOGGER.info(
+                    "[base_amount] cycle-adjust %s -> %s required=%s side=%s entry_count=%s min_entry=%s",
+                    base_amount,
+                    cycle_base_amount,
+                    cycle_required_base,
+                    cfg.side,
+                    cycle_entry_count,
+                    cycle_min_entry_text,
+                )
+                base_amount = cycle_base_amount
+
             await run_one_cycle(
                 monitor=monitor,
                 account_api=account_api,
@@ -1252,7 +1348,7 @@ async def run_strategy(cfg: GridConfig) -> None:
                 cfg=cfg,
                 current_price=current_price,
                 price_decimals=price_decimals,
-                base_amount=base_amount,
+                base_amount=cycle_base_amount,
                 account_index=account_index,
                 auth_mgr=auth_mgr,
                 state_path=state_path,
