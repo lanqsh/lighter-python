@@ -30,8 +30,10 @@ Lighter SDK 与 Binance 的关键差异适配
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import time
+from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any
@@ -54,6 +56,38 @@ SLOT_FILLED = "FILLED"  # 开仓单成交，止盈单已提交，在交易所活
 
 # Lighter Order.status 中表示活跃的枚举值
 ACTIVE_STATUSES = {"open", "in-progress", "pending"}
+SIDE_LONG = "long"
+SIDE_SHORT = "short"
+LOGGER = logging.getLogger("smart_grid")
+
+
+def setup_logging(market_id: int, side: str) -> Path:
+    log_dir = Path.cwd() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"smart_grid_market{market_id}_{side}.log"
+
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.propagate = False
+    LOGGER.handlers.clear()
+
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
+    LOGGER.addHandler(file_handler)
+    LOGGER.addHandler(console_handler)
+    LOGGER.info("[logger] initialized path=%s", log_path)
+    return log_path
 
 
 # ════════════════════════════════════════════════════════════
@@ -74,6 +108,49 @@ class GridSlot:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "GridSlot":
         return cls(**d)
+
+
+@dataclass
+class PositionSnapshot:
+    market_id: int
+    symbol: str
+    sign: int
+    position: float
+    avg_entry_price: float
+    unrealized_pnl: float
+    realized_pnl: float
+    open_order_count: int
+    pending_order_count: int
+
+
+@dataclass
+class RuntimeMonitor:
+    last_position: Optional[PositionSnapshot] = None
+    seen_trade_ids: Set[int] = field(default_factory=set)
+    recent_trade_client_ids: Set[int] = field(default_factory=set)
+    order_lifecycles: Dict[int, "OrderLifecycle"] = field(default_factory=dict)
+
+
+@dataclass
+class OrderLifecycle:
+    client_order_index: int
+    label: str
+    event: str
+    is_ask: bool
+    reduce_only: bool
+    slot_side: str = ""
+    slot_kind: str = ""
+    entry_price: float = 0.0
+    tp_price: float = 0.0
+    tx_hash: str = ""
+    error: str = ""
+
+
+@dataclass
+class TradeEvidence:
+    new_trade_client_ids: Set[int] = field(default_factory=set)
+    position_before: Optional[PositionSnapshot] = None
+    position_after: Optional[PositionSnapshot] = None
 
 
 # ════════════════════════════════════════════════════════════
@@ -133,7 +210,7 @@ class GridState:
             state.short_slots = {k: GridSlot.from_dict(v) for k, v in data.get("short_slots", {}).items()}
             return state
         except Exception as e:
-            print(f"[warn] Failed to load state file ({e}), will rebuild from exchange.")
+            LOGGER.warning("Failed to load state file (%s), will rebuild from exchange.", e)
             return None
 
 
@@ -146,6 +223,7 @@ class GridConfig:
     levels:            int
     price_step:        float
     base_amount:       int
+    side:              str
     poll_interval_sec: float
     max_cycles:        int
     start_order_index: int
@@ -162,6 +240,7 @@ def parse_args() -> GridConfig:
     p.add_argument("--levels",            type=int,   default=10,    help="每侧格子数量")
     p.add_argument("--price-step",        type=float, default=10.0,  help="相邻格子绝对价差(human units)")
     p.add_argument("--base-amount",       type=int,   default=0,     help="每格数量(wire). 0=自动最小值")
+    p.add_argument("--side",              type=str,   default=SIDE_LONG, choices=[SIDE_LONG, SIDE_SHORT], help="单向仓位方向: long 或 short")
     p.add_argument("--poll-interval-sec", type=float, default=5.0)
     p.add_argument("--max-cycles",        type=int,   default=0,     help="0=永久运行")
     p.add_argument("--start-order-index", type=int,   default=200000)
@@ -173,6 +252,7 @@ def parse_args() -> GridConfig:
         levels=args.levels,
         price_step=args.price_step,
         base_amount=args.base_amount,
+        side=args.side,
         poll_interval_sec=args.poll_interval_sec,
         max_cycles=args.max_cycles,
         start_order_index=args.start_order_index,
@@ -205,6 +285,115 @@ def read_strategy_overrides(resolved_config_file: str) -> Dict[str, Any]:
     return v if isinstance(v, dict) else {}
 
 
+def normalize_side(side: str) -> str:
+    side_norm = str(side).strip().lower()
+    if side_norm not in {SIDE_LONG, SIDE_SHORT}:
+        raise ValueError(f"side must be '{SIDE_LONG}' or '{SIDE_SHORT}', got: {side}")
+    return side_norm
+
+
+def format_position_snapshot(snapshot: Optional[PositionSnapshot]) -> str:
+    if snapshot is None:
+        return "position=none"
+    return (
+        f"symbol={snapshot.symbol} market_id={snapshot.market_id} sign={snapshot.sign} "
+        f"position={snapshot.position} avg_entry={snapshot.avg_entry_price} "
+        f"upl={snapshot.unrealized_pnl} rpl={snapshot.realized_pnl} "
+        f"open_orders={snapshot.open_order_count} pending_orders={snapshot.pending_order_count}"
+    )
+
+
+def position_size_signed(snapshot: Optional[PositionSnapshot]) -> float:
+    if snapshot is None:
+        return 0.0
+    return snapshot.position * snapshot.sign
+
+
+def record_order_lifecycle(
+    monitor: RuntimeMonitor,
+    client_order_index: int,
+    label: str,
+    event: str,
+    is_ask: bool,
+    reduce_only: bool,
+    slot: Optional[GridSlot] = None,
+    slot_kind: str = "",
+    tx_hash: str = "",
+    error: str = "",
+) -> None:
+    prev = monitor.order_lifecycles.get(client_order_index)
+    effective_slot_side = "LONG" if slot is not None and slot.is_long else ("SHORT" if slot is not None else (prev.slot_side if prev is not None else ""))
+    effective_slot_kind = slot_kind or (prev.slot_kind if prev is not None else "")
+    effective_entry_price = slot.place_price if slot is not None else (prev.entry_price if prev is not None else 0.0)
+    effective_tp_price = slot.tp_price if slot is not None else (prev.tp_price if prev is not None else 0.0)
+    monitor.order_lifecycles[client_order_index] = OrderLifecycle(
+        client_order_index=client_order_index,
+        label=label,
+        event=event,
+        is_ask=is_ask,
+        reduce_only=reduce_only,
+        slot_side=effective_slot_side,
+        slot_kind=effective_slot_kind,
+        entry_price=effective_entry_price,
+        tp_price=effective_tp_price,
+        tx_hash=tx_hash,
+        error=error,
+    )
+    LOGGER.info(
+        "[coi] %s | %s | %s/%s | e=%.4f tp=%.4f | ask=%s ro=%s | tx=%s | err=%s | %s",
+        client_order_index,
+        event,
+        effective_slot_side,
+        effective_slot_kind,
+        effective_entry_price,
+        effective_tp_price,
+        is_ask,
+        reduce_only,
+        tx_hash,
+        error,
+        label,
+    )
+
+
+def summarize_active_slots(
+    state: GridState,
+    side: str,
+    active_set: Dict[int, Any],
+    max_items: int = 12,
+) -> str:
+    slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    rows: List[Tuple[float, str]] = []
+    for slot in slots:
+        if slot.status == SLOT_NEW and slot.place_order_idx in active_set:
+            rows.append((slot.place_price, f"ENTRY#{slot.place_order_idx}@{slot.place_price:.2f}->tp{slot.tp_price:.2f}"))
+        elif slot.status == SLOT_FILLED and slot.tp_order_idx in active_set:
+            rows.append((slot.tp_price, f"TP#{slot.tp_order_idx}@{slot.tp_price:.2f}(entry{slot.place_price:.2f})"))
+    rows.sort(key=lambda x: x[0])
+    if not rows:
+        return "none"
+    body = " | ".join(text for _, text in rows[:max_items])
+    more = "" if len(rows) <= max_items else f" | ...(+{len(rows) - max_items})"
+    return body + more
+
+
+def evidence_confirms_entry_fill(slot: GridSlot, evidence: TradeEvidence) -> bool:
+    if slot.place_order_idx in evidence.new_trade_client_ids:
+        return True
+    before = position_size_signed(evidence.position_before)
+    after = position_size_signed(evidence.position_after)
+    delta = after - before
+    return delta > 0 if slot.is_long else delta < 0
+
+
+def evidence_confirms_tp_fill(slot: GridSlot, evidence: TradeEvidence) -> bool:
+    if slot.tp_order_idx in evidence.new_trade_client_ids:
+        return True
+    before = position_size_signed(evidence.position_before)
+    after = position_size_signed(evidence.position_after)
+    delta = after - before
+    return delta < 0 if slot.is_long else delta > 0
+
+
 def price_to_wire(price: float, price_decimals: int) -> int:
     """人类可读价格 → wire 整数"""
     return int(round(price * (10 ** price_decimals)))
@@ -225,9 +414,9 @@ def size_to_wire(size: float, size_decimals: int) -> int:
     return int(round(size * (10 ** size_decimals)))
 
 
-def state_file_path(config_file: str, market_id: int) -> Path:
-    """状态文件路径：固定存放在当前工作目录"""
-    return Path.cwd() / f"grid_state_market{market_id}.json"
+def state_file_path(config_file: str, market_id: int, side: str) -> Path:
+    """状态文件路径：固定存放在当前工作目录，并按方向隔离。"""
+    return Path.cwd() / f"grid_state_market{market_id}_{side}.json"
 
 
 # ════════════════════════════════════════════════════════════
@@ -272,6 +461,144 @@ async def fetch_active_orders(
     return resp.orders or []
 
 
+async def fetch_position_snapshot(
+    account_api: lighter.AccountApi,
+    account_index: int,
+    market_id: int,
+) -> Optional[PositionSnapshot]:
+    resp = await account_api.account(by="index", value=str(account_index))
+    accounts = resp.accounts or []
+    if not accounts:
+        return None
+
+    for pos in accounts[0].positions or []:
+        if int(pos.market_id) != market_id:
+            continue
+        return PositionSnapshot(
+            market_id=int(pos.market_id),
+            symbol=str(pos.symbol),
+            sign=int(pos.sign),
+            position=float(str(pos.position)),
+            avg_entry_price=float(str(pos.avg_entry_price)),
+            unrealized_pnl=float(str(pos.unrealized_pnl)),
+            realized_pnl=float(str(pos.realized_pnl)),
+            open_order_count=int(pos.open_order_count),
+            pending_order_count=int(pos.pending_order_count),
+        )
+
+    return PositionSnapshot(
+        market_id=market_id,
+        symbol="",
+        sign=0,
+        position=0.0,
+        avg_entry_price=0.0,
+        unrealized_pnl=0.0,
+        realized_pnl=0.0,
+        open_order_count=0,
+        pending_order_count=0,
+    )
+
+
+async def fetch_recent_trades(
+    order_api: lighter.OrderApi,
+    account_index: int,
+    market_id: int,
+    auth_token: str,
+    limit: int = 20,
+) -> List[Any]:
+    resp = await order_api.trades(
+        sort_by="timestamp",
+        limit=limit,
+        account_index=account_index,
+        market_id=market_id,
+        sort_dir="desc",
+        auth=auth_token,
+    )
+    return resp.trades or []
+
+
+def summarize_trade(trade: Any, account_index: int) -> str:
+    ask_account_id = int(trade.ask_account_id)
+    bid_account_id = int(trade.bid_account_id)
+    if ask_account_id == account_index:
+        side = "sell"
+        client_order_index = int(trade.ask_client_id)
+    elif bid_account_id == account_index:
+        side = "buy"
+        client_order_index = int(trade.bid_client_id)
+    else:
+        side = "unknown"
+        client_order_index = 0
+    return (
+        f"trade_id={int(trade.trade_id)} side={side} client_order_index={client_order_index} "
+        f"price={trade.price} size={trade.size} usd_amount={trade.usd_amount} tx_hash={trade.tx_hash}"
+    )
+
+
+async def initialize_runtime_monitor(
+    monitor: RuntimeMonitor,
+    account_api: lighter.AccountApi,
+    order_api: lighter.OrderApi,
+    auth_mgr: "AuthTokenManager",
+    account_index: int,
+    market_id: int,
+) -> None:
+    monitor.last_position = await fetch_position_snapshot(account_api, account_index, market_id)
+    LOGGER.info("[position:init] %s", format_position_snapshot(monitor.last_position))
+
+    auth_token = await auth_mgr.get()
+    trades = await fetch_recent_trades(order_api, account_index, market_id, auth_token)
+    monitor.seen_trade_ids = {int(t.trade_id) for t in trades}
+    monitor.recent_trade_client_ids = {
+        int(t.ask_client_id) for t in trades if int(t.ask_account_id) == account_index
+    } | {
+        int(t.bid_client_id) for t in trades if int(t.bid_account_id) == account_index
+    }
+    LOGGER.info("[trade:init] loaded recent trade baseline count=%s", len(monitor.seen_trade_ids))
+
+
+async def collect_trade_evidence(
+    monitor: RuntimeMonitor,
+    account_api: lighter.AccountApi,
+    order_api: lighter.OrderApi,
+    auth_mgr: "AuthTokenManager",
+    account_index: int,
+    market_id: int,
+) -> TradeEvidence:
+    evidence = TradeEvidence(position_before=monitor.last_position)
+    snapshot = await fetch_position_snapshot(account_api, account_index, market_id)
+    evidence.position_after = snapshot
+    if format_position_snapshot(snapshot) != format_position_snapshot(monitor.last_position):
+        LOGGER.info(
+            "[position:change] before=(%s) after=(%s)",
+            format_position_snapshot(monitor.last_position),
+            format_position_snapshot(snapshot),
+        )
+
+    auth_token = await auth_mgr.get()
+    trades = await fetch_recent_trades(order_api, account_index, market_id, auth_token)
+    new_trades = [t for t in reversed(trades) if int(t.trade_id) not in monitor.seen_trade_ids]
+    for trade in new_trades:
+        trade_id = int(trade.trade_id)
+        monitor.seen_trade_ids.add(trade_id)
+        LOGGER.info("[trade:new] %s", summarize_trade(trade, account_index))
+        if int(trade.ask_account_id) == account_index:
+            evidence.new_trade_client_ids.add(int(trade.ask_client_id))
+        if int(trade.bid_account_id) == account_index:
+            evidence.new_trade_client_ids.add(int(trade.bid_client_id))
+
+    if len(monitor.seen_trade_ids) > 500:
+        monitor.seen_trade_ids = {int(t.trade_id) for t in trades[:200]}
+
+    monitor.recent_trade_client_ids = {
+        int(t.ask_client_id) for t in trades if int(t.ask_account_id) == account_index
+    } | {
+        int(t.bid_client_id) for t in trades if int(t.bid_account_id) == account_index
+    }
+    monitor.last_position = snapshot
+    return evidence
+
+
 # ════════════════════════════════════════════════════════════
 #  Auth token 自动刷新管理器
 # ════════════════════════════════════════════════════════════
@@ -291,7 +618,7 @@ class AuthTokenManager:
                 raise RuntimeError(f"Failed to create auth token: {err}")
             self._token     = token
             self._expire_at = time.time() + self._ttl
-            print(f"[auth] token refreshed (valid {self._ttl}s)")
+            LOGGER.info("[auth] token refreshed (valid %ss)", self._ttl)
         return self._token
 
 
@@ -304,6 +631,7 @@ def build_state_from_exchange(
     price_step:        float,
     price_decimals:    int,
     start_order_index: int,
+    side:              str,
 ) -> GridState:
     """
     识别规则（依赖 reduce_only=True 标记止盈单）：
@@ -316,6 +644,7 @@ def build_state_from_exchange(
     """
     state   = GridState(start_order_index)
     max_idx = start_order_index - 1
+    side = normalize_side(side)
 
     for o in active_orders:
         coi         = int(o.client_order_index)
@@ -325,16 +654,16 @@ def build_state_from_exchange(
         reduce_only = bool(o.reduce_only)
         max_idx     = max(max_idx, coi)
 
-        if not is_ask and not reduce_only:
+        if side == SIDE_LONG and not is_ask and not reduce_only:
             # 多方开仓 BUY open
             k    = GridState.price_key(price)
             slot = state.long_slots.setdefault(
                 k, GridSlot(place_price=price, tp_price=price + price_step, is_long=True))
             slot.status          = SLOT_NEW
             slot.place_order_idx = coi
-            print(f"  [rebuild] LONG  entry @{price:.4f}  coi={coi}")
+            LOGGER.info("[rebuild] LONG entry @%.4f coi=%s", price, coi)
 
-        elif is_ask and reduce_only:
+        elif side == SIDE_LONG and is_ask and reduce_only:
             # 多方止盈 SELL reduce_only，对应开仓价 = tp_price - price_step
             entry_price = price - price_step
             k    = GridState.price_key(entry_price)
@@ -343,18 +672,18 @@ def build_state_from_exchange(
             slot.status       = SLOT_FILLED
             slot.tp_order_idx = coi
             slot.tp_price     = price
-            print(f"  [rebuild] LONG  tp    @{price:.4f}  (entry={entry_price:.4f})  coi={coi}")
+            LOGGER.info("[rebuild] LONG tp @%.4f entry=%.4f coi=%s", price, entry_price, coi)
 
-        elif is_ask and not reduce_only:
+        elif side == SIDE_SHORT and is_ask and not reduce_only:
             # 空方开仓 SELL open
             k    = GridState.price_key(price)
             slot = state.short_slots.setdefault(
                 k, GridSlot(place_price=price, tp_price=price - price_step, is_long=False))
             slot.status          = SLOT_NEW
             slot.place_order_idx = coi
-            print(f"  [rebuild] SHORT entry @{price:.4f}  coi={coi}")
+            LOGGER.info("[rebuild] SHORT entry @%.4f coi=%s", price, coi)
 
-        elif not is_ask and reduce_only:
+        elif side == SIDE_SHORT and not is_ask and reduce_only:
             # 空方止盈 BUY reduce_only，对应开仓价 = tp_price + price_step
             entry_price = price + price_step
             k    = GridState.price_key(entry_price)
@@ -363,7 +692,7 @@ def build_state_from_exchange(
             slot.status       = SLOT_FILLED
             slot.tp_order_idx = coi
             slot.tp_price     = price
-            print(f"  [rebuild] SHORT tp    @{price:.4f}  (entry={entry_price:.4f})  coi={coi}")
+            LOGGER.info("[rebuild] SHORT tp @%.4f entry=%.4f coi=%s", price, entry_price, coi)
 
     state.next_order_idx = max_idx + 1
     return state
@@ -373,6 +702,7 @@ def build_state_from_exchange(
 #  下单 / 撤单封装
 # ════════════════════════════════════════════════════════════
 async def do_place_order(
+    monitor:     RuntimeMonitor,
     client:      lighter.SignerClient,
     market_id:   int,
     order_idx:   int,
@@ -382,11 +712,17 @@ async def do_place_order(
     reduce_only: bool,
     dry_run:     bool,
     label:       str,
+    slot:        Optional[GridSlot] = None,
+    slot_kind:   str = "",
 ) -> bool:
-    print(f"[order] {label}  coi={order_idx}  market={market_id}  "
-          f"base_amount={base_amount}  price_wire={wire_price}  "
-          f"is_ask={is_ask}  reduce_only={reduce_only}")
+    LOGGER.info(
+        "[order:req] label=%s coi=%s market=%s base_amount=%s price_wire=%s is_ask=%s reduce_only=%s",
+        label, order_idx, market_id, base_amount, wire_price, is_ask, reduce_only,
+    )
+    record_order_lifecycle(monitor, order_idx, label, "request", is_ask, reduce_only, slot=slot, slot_kind=slot_kind)
     if dry_run:
+        LOGGER.info("[order:dry-run] label=%s coi=%s", label, order_idx)
+        record_order_lifecycle(monitor, order_idx, label, "dry-run", is_ask, reduce_only, slot=slot, slot_kind=slot_kind)
         return True
     _, tx_hash, err = await client.create_order(
         market_index=market_id,
@@ -400,13 +736,16 @@ async def do_place_order(
         trigger_price=0,
     )
     if err is not None:
-        print(f"[warn] {label} FAILED  coi={order_idx}  err={err}")
+        LOGGER.warning("[order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+        record_order_lifecycle(monitor, order_idx, label, "rejected", is_ask, reduce_only, slot=slot, slot_kind=slot_kind, tx_hash=str(tx_hash or ""), error=str(err))
         return False
-    print(f"[ok]   {label}  coi={order_idx}  tx={tx_hash}")
+    LOGGER.info("[order:resp] label=%s coi=%s tx_hash=%s err=None", label, order_idx, tx_hash)
+    record_order_lifecycle(monitor, order_idx, label, "accepted", is_ask, reduce_only, slot=slot, slot_kind=slot_kind, tx_hash=str(tx_hash or ""))
     return True
 
 
 async def do_cancel_order(
+    monitor:    RuntimeMonitor,
     client:    lighter.SignerClient,
     market_id: int,
     order_idx: int,
@@ -414,17 +753,42 @@ async def do_cancel_order(
     label:     str,
 ) -> None:
     if dry_run:
-        print(f"[DRY] cancel {label}  coi={order_idx}")
+        LOGGER.info("[cancel:dry-run] label=%s coi=%s", label, order_idx)
+        record_order_lifecycle(monitor, order_idx, label, "cancel-dry-run", False, False)
         return
+    LOGGER.info("[cancel:req] label=%s coi=%s market=%s", label, order_idx, market_id)
+    existing = monitor.order_lifecycles.get(order_idx)
+    record_order_lifecycle(
+        monitor,
+        order_idx,
+        label,
+        "cancel-request",
+        existing.is_ask if existing is not None else False,
+        existing.reduce_only if existing is not None else False,
+        slot_kind=existing.slot_kind if existing is not None else "",
+    )
     _, tx_hash, err = await client.cancel_order(
         market_index=market_id, order_index=order_idx)
-    print(f"cancel {label}  coi={order_idx}  tx={tx_hash}  err={err}")
+    LOGGER.info("[cancel:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+    record_order_lifecycle(
+        monitor,
+        order_idx,
+        label,
+        "cancel-confirmed" if err is None else "cancel-failed",
+        existing.is_ask if existing is not None else False,
+        existing.reduce_only if existing is not None else False,
+        slot_kind=existing.slot_kind if existing is not None else "",
+        tx_hash=str(tx_hash or ""),
+        error="" if err is None else str(err),
+    )
 
 
 # ════════════════════════════════════════════════════════════
 #  单轮主循环  ——  对应 C++ RunGrid()
 # ════════════════════════════════════════════════════════════
 async def run_one_cycle(
+    monitor:        RuntimeMonitor,
+    account_api:    lighter.AccountApi,
     client:         lighter.SignerClient,
     order_api:      lighter.OrderApi,
     state:          GridState,
@@ -436,6 +800,8 @@ async def run_one_cycle(
     auth_mgr:       AuthTokenManager,
     state_path:     Path,
 ) -> None:
+    side = normalize_side(cfg.side)
+
     # ──────────────────────────────────────────────────────
     # 0. 获取交易所当前活跃订单
     #    active_set: client_order_index → Order
@@ -445,6 +811,28 @@ async def run_one_cycle(
     active_orders = await fetch_active_orders(
         order_api, account_index, cfg.market_id, auth_token)
     active_set: Dict[int, Any] = {int(o.client_order_index): o for o in active_orders}
+    LOGGER.info("[orders:active] count=%s market_id=%s side=%s", len(active_orders), cfg.market_id, side)
+    LOGGER.info("[slots:active] %s", summarize_active_slots(state, side, active_set))
+    evidence = await collect_trade_evidence(
+        monitor=monitor,
+        account_api=account_api,
+        order_api=order_api,
+        auth_mgr=auth_mgr,
+        account_index=account_index,
+        market_id=cfg.market_id,
+    )
+    for active_order in active_orders:
+        active_coi = int(active_order.client_order_index)
+        lifecycle = monitor.order_lifecycles.get(active_coi)
+        record_order_lifecycle(
+            monitor,
+            active_coi,
+            lifecycle.label if lifecycle is not None else f"exchange-order-{active_coi}",
+            f"active:{active_order.status}",
+            bool(active_order.is_ask),
+            bool(active_order.reduce_only),
+            slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
+        )
 
     aligned       = (int(current_price / cfg.price_step)) * cfg.price_step
     far_threshold = cfg.price_step * cfg.levels * 2
@@ -452,44 +840,92 @@ async def run_one_cycle(
     # ──────────────────────────────────────────────────────
     # 1. DeleteLong/ShortPlaceOrders：撤销距当前价过远的开仓单
     # ──────────────────────────────────────────────────────
-    for slot in list(state.long_slots.values()):
-        if (slot.status == SLOT_NEW
-                and slot.place_price < aligned - far_threshold
-                and slot.place_order_idx in active_set):
+    active_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    for slot in list(active_slots):
+        should_cancel = (
+            side == SIDE_LONG
+            and slot.status == SLOT_NEW
+            and slot.place_price < aligned - far_threshold
+            and slot.place_order_idx in active_set
+        ) or (
+            side == SIDE_SHORT
+            and slot.status == SLOT_NEW
+            and slot.place_price > aligned + far_threshold
+            and slot.place_order_idx in active_set
+        )
+        if should_cancel:
             await do_cancel_order(
-                client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
-                f"LONG entry(far) @{slot.place_price:.4f}")
-            slot.status = SLOT_IDLE
-
-    for slot in list(state.short_slots.values()):
-        if (slot.status == SLOT_NEW
-                and slot.place_price > aligned + far_threshold
-                and slot.place_order_idx in active_set):
-            await do_cancel_order(
-                client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
-                f"SHORT entry(far) @{slot.place_price:.4f}")
+                monitor, client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
+                f"{'LONG' if slot.is_long else 'SHORT'} entry(far) @{slot.place_price:.4f}")
             slot.status = SLOT_IDLE
 
     # ──────────────────────────────────────────────────────
     # 2a. CheckFilledOrders Step A：
     #     开仓单已不在活跃列表 → 视为成交 → 挂止盈单（reduce_only=True）
     # ──────────────────────────────────────────────────────
-    all_slots = list(state.long_slots.values()) + list(state.short_slots.values())
+    all_slots = list(active_slots)
     for slot in all_slots:
         if slot.status != SLOT_NEW:
             continue
         if slot.place_order_idx in active_set:
             continue  # 仍在挂单中
+        LOGGER.info(
+            "[fill:candidate] entry_order_disappeared side=%s entry_price=%.4f coi=%s",
+            "LONG" if slot.is_long else "SHORT",
+            slot.place_price,
+            slot.place_order_idx,
+        )
+        record_order_lifecycle(
+            monitor,
+            slot.place_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            "disappeared-from-active",
+            not slot.is_long,
+            False,
+            slot=slot,
+            slot_kind="entry",
+        )
+        if not evidence_confirms_entry_fill(slot, evidence):
+            LOGGER.warning(
+                "[fill:rejected] side=%s entry_price=%.4f coi=%s reason=no trade/position evidence",
+                "LONG" if slot.is_long else "SHORT",
+                slot.place_price,
+                slot.place_order_idx,
+            )
+            record_order_lifecycle(
+                monitor,
+                slot.place_order_idx,
+                f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+                "disappeared-without-fill-evidence",
+                not slot.is_long,
+                False,
+                slot=slot,
+                slot_kind="entry",
+            )
+            slot.status = SLOT_IDLE
+            continue
+        record_order_lifecycle(
+            monitor,
+            slot.place_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            "fill-confirmed",
+            not slot.is_long,
+            False,
+            slot=slot,
+            slot_kind="entry",
+        )
 
         tp_idx  = state.alloc_idx()
         tp_wire = price_to_wire(slot.tp_price, price_decimals)
         label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
         ok = await do_place_order(
-            client, cfg.market_id, tp_idx, base_amount, tp_wire,
+            monitor, client, cfg.market_id, tp_idx, base_amount, tp_wire,
             is_ask=slot.is_long,     # 多方止盈=SELL(ask=True); 空方止盈=BUY(ask=False)
             reduce_only=True,
             dry_run=cfg.dry_run,
             label=label,
+            slot=slot,
+            slot_kind="tp",
         )
         if ok:
             slot.tp_order_idx = tp_idx
@@ -502,78 +938,123 @@ async def run_one_cycle(
     # 2b. CheckFilledOrders Step B：
     #     止盈单已不在活跃列表 → 止盈已成交 → 重置 IDLE + 计数
     # ──────────────────────────────────────────────────────
-    all_slots = list(state.long_slots.values()) + list(state.short_slots.values())
+    all_slots = list(active_slots)
     for slot in all_slots:
         if slot.status != SLOT_FILLED:
             continue
         if slot.tp_order_idx in active_set:
             continue  # 止盈单仍在挂单中
+        record_order_lifecycle(
+            monitor,
+            slot.tp_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            "disappeared-from-active",
+            slot.is_long,
+            True,
+            slot=slot,
+            slot_kind="tp",
+        )
+        if not evidence_confirms_tp_fill(slot, evidence):
+            LOGGER.warning(
+                "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
+                "LONG" if slot.is_long else "SHORT",
+                slot.tp_price,
+                slot.tp_order_idx,
+            )
+            record_order_lifecycle(
+                monitor,
+                slot.tp_order_idx,
+                f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+                "disappeared-without-fill-evidence",
+                slot.is_long,
+                True,
+                slot=slot,
+                slot_kind="tp",
+            )
+            continue
 
         slot.status = SLOT_IDLE
         state.success_count += 1
-        print(f"TRADE {'LONG' if slot.is_long else 'SHORT'} "
-              f"#{state.success_count}  "
-              f"entry={slot.place_price:.4f} → tp={slot.tp_price:.4f}")
+        record_order_lifecycle(
+            monitor,
+            slot.tp_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            "fill-confirmed",
+            slot.is_long,
+            True,
+            slot=slot,
+            slot_kind="tp",
+        )
+        LOGGER.info(
+            "[trade:slot-closed] side=%s count=%s entry=%.4f tp=%.4f",
+            "LONG" if slot.is_long else "SHORT",
+            state.success_count,
+            slot.place_price,
+            slot.tp_price,
+        )
 
     # ──────────────────────────────────────────────────────
     # 3. MakeLong/ShortPlaceOrders：为 IDLE 格子补挂开仓单
     # ──────────────────────────────────────────────────────
 
-    # 多方：BUY below current price
-    for i in range(1, cfg.levels + 1):
-        place_price = aligned - cfg.price_step * i
-        if place_price <= 0 or place_price >= current_price:
-            continue
-        k    = GridState.price_key(place_price)
-        slot = state.long_slots.get(k)
-        if slot is None:
-            slot = GridSlot(
-                place_price=place_price,
-                tp_price=place_price + cfg.price_step,
-                is_long=True,
+    if side == SIDE_LONG:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned - cfg.price_step * i
+            if place_price <= 0 or place_price >= current_price:
+                continue
+            k    = GridState.price_key(place_price)
+            slot = state.long_slots.get(k)
+            if slot is None:
+                slot = GridSlot(
+                    place_price=place_price,
+                    tp_price=place_price + cfg.price_step,
+                    is_long=True,
+                )
+                state.long_slots[k] = slot
+            if slot.status != SLOT_IDLE:
+                continue
+            place_idx = state.alloc_idx()
+            ok = await do_place_order(
+                monitor, client, cfg.market_id, place_idx, base_amount,
+                price_to_wire(place_price, price_decimals),
+                is_ask=False, reduce_only=False,
+                dry_run=cfg.dry_run,
+                label=f"LONG entry @{place_price:.4f}",
+                slot=slot,
+                slot_kind="entry",
             )
-            state.long_slots[k] = slot
-        if slot.status != SLOT_IDLE:
-            continue
-        place_idx = state.alloc_idx()
-        ok = await do_place_order(
-            client, cfg.market_id, place_idx, base_amount,
-            price_to_wire(place_price, price_decimals),
-            is_ask=False, reduce_only=False,
-            dry_run=cfg.dry_run,
-            label=f"LONG entry @{place_price:.4f}",
-        )
-        if ok:
-            slot.place_order_idx = place_idx
-            slot.status          = SLOT_NEW
-
-    # 空方：SELL above current price
-    for i in range(1, cfg.levels + 1):
-        place_price = aligned + cfg.price_step * i
-        if place_price <= current_price:
-            continue
-        k    = GridState.price_key(place_price)
-        slot = state.short_slots.get(k)
-        if slot is None:
-            slot = GridSlot(
-                place_price=place_price,
-                tp_price=place_price - cfg.price_step,
-                is_long=False,
+            if ok:
+                slot.place_order_idx = place_idx
+                slot.status          = SLOT_NEW
+    else:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned + cfg.price_step * i
+            if place_price <= current_price:
+                continue
+            k    = GridState.price_key(place_price)
+            slot = state.short_slots.get(k)
+            if slot is None:
+                slot = GridSlot(
+                    place_price=place_price,
+                    tp_price=place_price - cfg.price_step,
+                    is_long=False,
+                )
+                state.short_slots[k] = slot
+            if slot.status != SLOT_IDLE:
+                continue
+            place_idx = state.alloc_idx()
+            ok = await do_place_order(
+                monitor, client, cfg.market_id, place_idx, base_amount,
+                price_to_wire(place_price, price_decimals),
+                is_ask=True, reduce_only=False,
+                dry_run=cfg.dry_run,
+                label=f"SHORT entry @{place_price:.4f}",
+                slot=slot,
+                slot_kind="entry",
             )
-            state.short_slots[k] = slot
-        if slot.status != SLOT_IDLE:
-            continue
-        place_idx = state.alloc_idx()
-        ok = await do_place_order(
-            client, cfg.market_id, place_idx, base_amount,
-            price_to_wire(place_price, price_decimals),
-            is_ask=True, reduce_only=False,
-            dry_run=cfg.dry_run,
-            label=f"SHORT entry @{place_price:.4f}",
-        )
-        if ok:
-            slot.place_order_idx = place_idx
-            slot.status          = SLOT_NEW
+            if ok:
+                slot.place_order_idx = place_idx
+                slot.status          = SLOT_NEW
 
     # ──────────────────────────────────────────────────────
     # 4. 持久化状态
@@ -590,9 +1071,11 @@ async def run_strategy(cfg: GridConfig) -> None:
         raise ValueError("levels must be > 0")
     if cfg.price_step <= 0:
         raise ValueError("price-step must be > 0")
+    cfg.side = normalize_side(cfg.side)
+    log_path = setup_logging(cfg.market_id, cfg.side)
 
     base_url, account_index, private_keys, resolved_cfg_path = load_api_key_config(cfg.config_file)
-    print(f"[config] using: {resolved_cfg_path}")
+    LOGGER.info("[config] using: %s", resolved_cfg_path)
     file_cfg = read_strategy_overrides(resolved_cfg_path)
 
     # 从配置文件覆盖参数
@@ -605,19 +1088,22 @@ async def run_strategy(cfg: GridConfig) -> None:
     ]:
         if file_cfg.get(key) is not None:
             setattr(cfg, attr, conv(file_cfg[key]))
+    if file_cfg.get("side") is not None:
+        cfg.side = normalize_side(file_cfg["side"])
+        log_path = setup_logging(cfg.market_id, cfg.side)
 
-    print(
-        f"[config] market_id={cfg.market_id}  levels={cfg.levels}  "
-        f"price_step={cfg.price_step}  leverage={cfg.leverage}x  "
-        f"base_amount={cfg.base_amount}  poll_interval={cfg.poll_interval_sec}s  "
-        f"max_cycles={cfg.max_cycles}  start_order_index={cfg.start_order_index}  "
-        f"dry_run={cfg.dry_run}"
+    LOGGER.info(
+        "[config] market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s",
+        cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
+        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run,
     )
+    LOGGER.info("[logger] active log file: %s", log_path)
 
     # ── SDK 初始化 ───────────────────────────────────────
     configuration = lighter.Configuration(host=base_url)
     configuration.api_key = {"default": private_keys[min(private_keys.keys())]}
     api_client  = lighter.ApiClient(configuration=configuration)
+    account_api = lighter.AccountApi(api_client)
     order_api   = lighter.OrderApi(api_client)
     client      = lighter.SignerClient(
         url=base_url,
@@ -626,22 +1112,13 @@ async def run_strategy(cfg: GridConfig) -> None:
     )
 
     state:      Optional[GridState] = None
-    state_path: Path                = state_file_path(cfg.config_file, cfg.market_id)
+    state_path: Path                = state_file_path(cfg.config_file, cfg.market_id, cfg.side)
+    monitor = RuntimeMonitor()
 
     try:
         err = client.check_client()
         if err is not None:
             raise RuntimeError(f"check_client failed: {err}")
-
-        # 设置杠杆
-        if cfg.leverage > 1:
-            print(f"Setting leverage to {cfg.leverage}x ...")
-            _, __, err = await client.update_leverage(
-                market_index=cfg.market_id, margin_mode=1, leverage=cfg.leverage)
-            if err:
-                print(f"[warn] set leverage failed: {err}")
-            else:
-                print(f"Leverage set to {cfg.leverage}x")
 
         # ── 市场信息 ─────────────────────────────────────
         # PerpsOrderBookDetail 关键字段：
@@ -661,13 +1138,43 @@ async def run_strategy(cfg: GridConfig) -> None:
         quote_multiplier = int(market_detail.quote_multiplier)
 
         # 打印完整市场信息，方便诊断下单失败问题
-        print(
-            f"[market] symbol={symbol}  market_id={cfg.market_id}\n"
-            f"         price_decimals={price_decimals}  size_decimals={size_decimals}"
-            f"  quote_multiplier={quote_multiplier}\n"
-            f"         min_base_amount={min_base_amount}  min_quote_amount={min_quote_amount}"
-            f"  last_price={current_price}"
+        LOGGER.info(
+            "[market] symbol=%s market_id=%s price_decimals=%s size_decimals=%s quote_multiplier=%s min_base_amount=%s min_quote_amount=%s last_price=%s",
+            symbol, cfg.market_id, price_decimals, size_decimals, quote_multiplier,
+            min_base_amount, min_quote_amount, current_price,
         )
+
+        # 设置杠杆（配置超过市场上限时，自动降到允许的最大值）
+        if cfg.leverage > 1:
+            min_imf = int(getattr(market_detail, "min_initial_margin_fraction", 0) or 0)
+            if min_imf > 0:
+                max_leverage = max(1, 10_000 // min_imf)
+                effective_leverage = min(cfg.leverage, max_leverage)
+                if cfg.leverage > max_leverage:
+                    LOGGER.warning(
+                        "Requested leverage=%sx exceeds market max=%sx (min_initial_margin_fraction=%s). Using max leverage.",
+                        cfg.leverage,
+                        max_leverage,
+                        min_imf,
+                    )
+                cfg.leverage = effective_leverage
+            else:
+                LOGGER.warning(
+                    "min_initial_margin_fraction missing/invalid for market_id=%s, using configured leverage=%sx as-is.",
+                    cfg.market_id,
+                    cfg.leverage,
+                )
+
+            LOGGER.info("Setting leverage to %sx ...", cfg.leverage)
+            tx_info, api_response, err = await client.update_leverage(
+                market_index=cfg.market_id, margin_mode=1, leverage=cfg.leverage)
+            if err:
+                LOGGER.warning("set leverage failed: %s", err)
+            else:
+                LOGGER.info("[leverage] updated tx_info=%s response=%s", tx_info, api_response)
+        elif cfg.leverage <= 0:
+            LOGGER.warning("Configured leverage=%s is invalid; fallback to 1x.", cfg.leverage)
+            cfg.leverage = 1
 
         base_amount = cfg.base_amount
         if base_amount <= 0:
@@ -682,40 +1189,48 @@ async def run_strategy(cfg: GridConfig) -> None:
             if quote_wire < min_quote_wire and price_wire_now > 0:
                 # 向上调整 base_amount 直到 quote_wire >= min_quote_wire
                 base_amount = (min_quote_wire * quote_multiplier + price_wire_now - 1) // price_wire_now
-            print(
-                f"[base_amount] auto={base_amount}  "
-                f"quote_wire_est={base_amount * price_wire_now // quote_multiplier}  "
-                f"min_quote_wire={min_quote_wire}"
+            LOGGER.info(
+                "[base_amount] auto=%s quote_wire_est=%s min_quote_wire=%s",
+                base_amount,
+                base_amount * price_wire_now // quote_multiplier,
+                min_quote_wire,
             )
 
         # ── Auth token ───────────────────────────────────
         auth_mgr = AuthTokenManager(client, ttl_sec=3600)
 
         # ── 加载 / 重建状态 ──────────────────────────────
-        print(f"\nLoading strategy state: {state_path}")
+        LOGGER.info("Loading strategy state: %s", state_path)
         state = GridState.load(state_path, cfg.start_order_index)
 
         if state is not None:
-            print(f"State loaded: {state.summary()}")
-            print("Will verify against exchange on first cycle ...")
+            LOGGER.info("State loaded: %s", state.summary())
+            LOGGER.info("Will verify against exchange on first cycle ...")
         else:
-            print("No state file. Rebuilding from exchange active orders ...")
+            LOGGER.info("No state file. Rebuilding from exchange active orders ...")
             auth_token    = await auth_mgr.get()
             active_orders = await fetch_active_orders(
                 order_api, account_index, cfg.market_id, auth_token)
-            print(f"Found {len(active_orders)} active orders on exchange.")
+            LOGGER.info("Found %s active orders on exchange.", len(active_orders))
             state = build_state_from_exchange(
-                active_orders, cfg.price_step, price_decimals, cfg.start_order_index)
+                active_orders, cfg.price_step, price_decimals, cfg.start_order_index, cfg.side)
+
+        await initialize_runtime_monitor(
+            monitor=monitor,
+            account_api=account_api,
+            order_api=order_api,
+            auth_mgr=auth_mgr,
+            account_index=account_index,
+            market_id=cfg.market_id,
+        )
 
         aligned = (int(current_price / cfg.price_step)) * cfg.price_step
-        print(
-            f"\nstart  symbol={symbol}  market_id={cfg.market_id}  "
-            f"price={current_price:.4f}  aligned={aligned:.4f}\n"
-            f"       price_step={cfg.price_step}  levels={cfg.levels}  "
-            f"base_amount={base_amount}  leverage={cfg.leverage}x  "
-            f"dry_run={cfg.dry_run}"
+        LOGGER.info(
+            "start symbol=%s market_id=%s price=%.4f aligned=%.4f price_step=%s levels=%s base_amount=%s side=%s leverage=%sx dry_run=%s",
+            symbol, cfg.market_id, current_price, aligned, cfg.price_step, cfg.levels,
+            base_amount, cfg.side, cfg.leverage, cfg.dry_run,
         )
-        print(f"state: {state.summary()}\n")
+        LOGGER.info("state: %s", state.summary())
 
         # ── 主循环 ────────────────────────────────────────
         cycle = 0
@@ -726,9 +1241,11 @@ async def run_strategy(cfg: GridConfig) -> None:
             market_detail = await fetch_market_detail(order_api, cfg.market_id)
             current_price = float(market_detail.last_trade_price)
 
-            print(f"cycle={cycle}  price={current_price:.4f}  {state.summary()}")
+            LOGGER.info("cycle=%s price=%.4f %s", cycle, current_price, state.summary())
 
             await run_one_cycle(
+                monitor=monitor,
+                account_api=account_api,
                 client=client,
                 order_api=order_api,
                 state=state,
@@ -744,25 +1261,24 @@ async def run_strategy(cfg: GridConfig) -> None:
 
     finally:
         trades = state.success_count if state is not None else 0
-        print(f"\nExiting. Completed trades: {trades}")
-        print("Active orders remain on exchange (no cancellation on exit).")
+        LOGGER.info("Exiting. Completed trades: %s", trades)
+        LOGGER.info("Active orders remain on exchange (no cancellation on exit).")
         if state is not None and not cfg.dry_run:
             state.save(state_path)
-            print(f"State saved: {state_path}")
+            LOGGER.info("State saved: %s", state_path)
         for c, name in [(client, "SignerClient"), (api_client, "ApiClient")]:
             try:
                 await c.close()
             except Exception as e:
-                print(f"Error closing {name}: {e}")
+                LOGGER.warning("Error closing %s: %s", name, e)
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(run_strategy(parse_args()))
     except KeyboardInterrupt:
-        print("\nShutdown (Ctrl+C). Exiting gracefully...")
+        LOGGER.info("Shutdown (Ctrl+C). Exiting gracefully...")
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        LOGGER.exception("Fatal error: %s", e)
+        raise
 
