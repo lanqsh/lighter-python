@@ -1,80 +1,119 @@
 # Grid Strategy Example
 
-This folder contains a simple grid strategy for the Lighter Python SDK.
+This folder contains two grid strategy implementations for the Lighter Python SDK.
 
-## What It Does
+| 文件 | 说明 |
+|------|------|
+| `simple_grid_strategy.py` | 基础网格策略（双向，无状态持久化） |
+| `smart_grid_strategy.py` | **推荐** 智能单向网格策略（有状态持久化、自动止盈、日志监控） |
+| `api_key_config.example.json` | 配置文件示例 |
+| `query_doge_market.py` | 查询指定市场的 marketId、精度、最小下单量等信息 |
 
-- Reads your API config from `api_key_config.json`
-- Supports `grid` overrides inside `api_key_config.json`
-- Fetches market `last_trade_price` as the grid anchor
-- Places symmetric limit BUY/SELL orders around the anchor with fixed price step
-- Long grid and short grid run at the same time:
-  - Long grid side: BUY below anchor
-  - Short grid side: SELL above anchor
-- Rebalances by canceling and recreating all grid orders when price moves beyond a threshold
-- On restart, cancels all active orders for current market before running (does not close positions)
-- Cancels strategy orders on exit
+---
 
-## File
+## smart_grid_strategy.py
 
-- `simple_grid_strategy.py`: runnable strategy script
-- `api_key_config.example.json`: ETH example config
+### 功能特性
 
-## Run
+- **单向网格**：通过 `side=long/short` 配置，只做多或只做空，适配 DEX 单向持仓模式
+- **自动止盈**：开仓单成交后自动在 `entry+price_step` 挂止盈单
+- **状态持久化**：策略状态保存为 JSON 文件，重启后自动接管，不丢失格子状态
+- **全仓模式**：设置杠杆时自动使用全仓（cross margin）
+- **最小下单量兜底**：`baseAmount=0` 时按最深网格价自动计算满足交易所最小名义金额的数量；配置值偏小时自动抬升并打印警告
+- **杠杆上限保护**：超过市场允许的最大杠杆时自动降至上限
+- **成交确认**：通过成交记录和仓位变化双重证据确认开仓/止盈是否真实成交
+- **日志监控**：滚动文件日志 + 控制台双输出，记录代码行号、下单请求/响应、仓位变化、成交情况、每格生命周期
+- **TP 统计**：每次止盈成交后打印 `total_tp`（累计总次数）和 `today_tp`（当日次数，每天自动归零）
 
-From repository root:
+### 快速开始
+
+将示例配置复制为实际配置：
 
 ```bash
-python examples/grid_strategy/simple_grid_strategy.py --dry-run
+cp examples/grid_strategy/api_key_config.example.json \
+   examples/grid_strategy/api_key_config.json
+# 编辑 api_key_config.json，填入真实的 baseUrl / accountIndex / privateKeys
 ```
 
-Live trading (remove `--dry-run`):
+模拟运行（不下真实订单）：
 
 ```bash
-python examples/grid_strategy/simple_grid_strategy.py \
-  --market-id 0 \
-  --levels 4 \
-  --price-step 5 \
-  --rebalance-threshold 10 \
-  --base-amount 0 \
-  --poll-interval-sec 5
+cd examples/grid_strategy
+python smart_grid_strategy.py --dry-run
 ```
 
-Or use config overrides in `api_key_config.json`:
+实盘运行（先用测试网验证）：
+
+```bash
+cd examples/grid_strategy
+python smart_grid_strategy.py
+```
+
+> 策略运行目录必须包含 `api_key_config.json`，状态文件和日志也会写入该目录。
+
+### 配置文件
+
+在 `api_key_config.json` 的 `grid` 字段中覆盖策略参数：
 
 ```json
 {
-  "baseUrl": "https://testnet.zklighter.elliot.ai",
+  "baseUrl": "https://mainnet.zklighter.elliot.ai",
   "accountIndex": 123,
   "privateKeys": {
     "0": "0xyour_api_private_key_hex"
   },
   "grid": {
     "marketId": 0,
-    "levels": 4,
-    "priceStep": 5,
-    "rebalanceThreshold": 10,
+    "side": "long",
+    "levels": 5,
+    "priceStep": 10,
     "baseAmount": 0,
-    "clearOnStart": true
+    "leverage": 3
   }
 }
 ```
 
-`baseAmount = 0` means: use exchange minimum size (`min_base_amount`) automatically.
+### 参数说明
 
-## Important Parameters
+| 参数（命令行） | 配置文件键 | 默认值 | 说明 |
+|---|---|---|---|
+| `--market-id` | `marketId` | `0` | 市场 ID（可用 `query_doge_market.py` 查询） |
+| `--side` | `side` | `long` | 仓位方向：`long` 或 `short` |
+| `--levels` | `levels` | `10` | 网格层数 |
+| `--price-step` | `priceStep` | `10.0` | 相邻格子价差（human units，如 ETH 填 `10` 表示 $10） |
+| `--base-amount` | `baseAmount` | `0` | 每格下单数量（wire 整数）。`0` = 按最深网格价自动计算最小合法数量 |
+| `--leverage` | `leverage` | `1` | 杠杆倍数；超过市场上限自动降至上限 |
+| `--poll-interval-sec` | — | `5.0` | 每轮轮询间隔（秒） |
+| `--max-cycles` | — | `0` | 最大循环次数，`0` = 永久运行 |
+| `--start-order-index` | — | `200000` | 策略使用的起始 client_order_index |
+| `--dry-run` | — | `false` | 模拟运行，不提交真实订单 |
 
-- `--market-id`: market identifier
-- `--levels`: number of levels on each side of anchor
-- `--price-step`: absolute price spacing between adjacent grid orders
-- `--rebalance-threshold`: absolute anchor move to trigger grid rebuild
-- `--base-amount`: base asset size in SDK native units, `0` means auto minimum size
-- `--clear-on-start`: cancel all active orders in this market at startup
-- `--no-clear-on-start`: disable startup cancel behavior
-- `--start-order-index`: first order index used by strategy
+### baseAmount 填写说明
 
-## Safety Notes
+`baseAmount` 填写的是 **wire 整数**（非小数），换算公式：
 
-- Start with `--dry-run` to verify behavior.
-- Use testnet first.
-- This is an example strategy, not investment advice.
+```
+baseAmount = 目标数量 × 10^size_decimals
+```
+
+例如 ETH `size_decimals=4`，下单 0.006 ETH → `baseAmount=60`
+
+设为 `0` 时，策略会自动根据最深网格价和交易所 `min_quote_amount` 计算出所有档位都合法的最小数量。
+
+### 日志与状态文件
+
+| 文件 | 说明 |
+|------|------|
+| `logs/smart_grid_market{id}_{side}.log` | 滚动日志（最大 10MB × 5 个备份） |
+| `grid_state_market{id}_{side}.json` | 策略状态（格子状态、TP 统计，重启后自动加载） |
+
+TP 成交日志示例：
+```
+[trade:slot-closed] side=LONG total_tp=12 today_tp=3(2026-04-01) entry=2070.0000 tp=2080.0000
+```
+
+### 安全建议
+
+- 先用 `--dry-run` 验证参数和行为
+- 先在测试网（testnet）运行稳定后再切主网
+- 本策略仅为示例，不构成投资建议

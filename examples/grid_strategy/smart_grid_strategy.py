@@ -66,7 +66,7 @@ def setup_logging(market_id: int, side: str) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"smart_grid_market{market_id}_{side}.log"
 
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(filename)s:%(lineno)d | %(message)s")
     LOGGER.setLevel(logging.INFO)
     LOGGER.propagate = False
     LOGGER.handlers.clear()
@@ -162,6 +162,8 @@ class GridState:
         self.short_slots:   Dict[str, GridSlot] = {}
         self.next_order_idx: int = start_order_index
         self.success_count:  int = 0
+        self.today_tp_count: int = 0         # 当日 TP 次数，跨天自动归零
+        self.today_tp_date:  str = ""        # 格式 YYYY-MM-DD
 
     # ── key helpers ─────────────────────────────────────────
     @staticmethod
@@ -186,8 +188,10 @@ class GridState:
     # ── persistence ─────────────────────────────────────────
     def save(self, path: Path) -> None:
         data = {
-            "next_order_idx": self.next_order_idx,
-            "success_count":  self.success_count,
+            "next_order_idx":  self.next_order_idx,
+            "success_count":   self.success_count,
+            "today_tp_count":  self.today_tp_count,
+            "today_tp_date":   self.today_tp_date,
             "long_slots":  {k: v.to_dict() for k, v in self.long_slots.items()},
             "short_slots": {k: v.to_dict() for k, v in self.short_slots.items()},
         }
@@ -206,6 +210,8 @@ class GridState:
             state = cls(start_order_index)
             state.next_order_idx = int(data.get("next_order_idx", start_order_index))
             state.success_count  = int(data.get("success_count", 0))
+            state.today_tp_count = int(data.get("today_tp_count", 0))
+            state.today_tp_date  = str(data.get("today_tp_date", ""))
             state.long_slots  = {k: GridSlot.from_dict(v) for k, v in data.get("long_slots", {}).items()}
             state.short_slots = {k: GridSlot.from_dict(v) for k, v in data.get("short_slots", {}).items()}
             return state
@@ -1028,6 +1034,13 @@ async def run_one_cycle(
 
         slot.status = SLOT_IDLE
         state.success_count += 1
+        # 今日 TP 统计：跨天自动归零
+        import datetime as _dt
+        _today = _dt.date.today().isoformat()
+        if state.today_tp_date != _today:
+            state.today_tp_count = 0
+            state.today_tp_date  = _today
+        state.today_tp_count += 1
         record_order_lifecycle(
             monitor,
             slot.tp_order_idx,
@@ -1039,9 +1052,11 @@ async def run_one_cycle(
             slot_kind="tp",
         )
         LOGGER.info(
-            "[trade:slot-closed] side=%s count=%s entry=%.4f tp=%.4f",
+            "[trade:slot-closed] side=%s total_tp=%s today_tp=%s(%s) entry=%.4f tp=%.4f",
             "LONG" if slot.is_long else "SHORT",
             state.success_count,
+            state.today_tp_count,
+            state.today_tp_date,
             slot.place_price,
             slot.tp_price,
         )
