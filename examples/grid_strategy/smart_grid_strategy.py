@@ -20,6 +20,7 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 import lighter
 from lighter.exceptions import ApiException
+from market_utils import resolve_market_id_by_selector
 
 SLOT_IDLE   = "IDLE"
 SLOT_NEW    = "NEW"
@@ -244,6 +245,7 @@ class GridState:
 
 @dataclass
 class GridConfig:
+    market_symbol:     str
     market_id:         int
     levels:            int
     price_step:        float
@@ -257,6 +259,7 @@ class GridConfig:
 
 def default_grid_config() -> GridConfig:
     return GridConfig(
+        market_symbol="0",
         market_id=0,
         levels=10,
         price_step=10.0,
@@ -264,23 +267,23 @@ def default_grid_config() -> GridConfig:
         side=SIDE_LONG,
         poll_interval_sec=5.0,
         max_cycles=0,
-        start_order_index=200000,
+        start_order_index=10000,
         dry_run=False,
     )
 
 def load_grid_config(resolved_config_file: str) -> GridConfig:
     cfg = default_grid_config()
     file_cfg = read_strategy_overrides(resolved_config_file)
+
+    if file_cfg.get("marketId") is not None:
+        cfg.market_symbol = str(file_cfg["marketId"]).strip()
+
     for attr, key, conv in [
-        ("market_id", "marketId", int),
         ("levels", "levels", int),
         ("price_step", "priceStep", float),
         ("leverage", "leverage", int),
         ("base_amount", "baseAmount", int),
         ("poll_interval_sec", "pollIntervalSec", float),
-        ("max_cycles", "maxCycles", int),
-        ("start_order_index", "startOrderIndex", int),
-        ("dry_run", "dryRun", bool),
     ]:
         if file_cfg.get(key) is not None:
             setattr(cfg, attr, conv(file_cfg[key]))
@@ -1292,17 +1295,6 @@ async def run_strategy() -> None:
     if cfg.price_step <= 0:
         raise ValueError("price-step must be > 0")
     cfg.side = normalize_side(cfg.side)
-    log_path = setup_logging(cfg.market_id, cfg.side)
-    ORDER_TRACE_FILE = setup_order_trace_file(cfg.market_id, cfg.side)
-    LOGGER.info("[config] using: %s", resolved_cfg_path)
-
-    LOGGER.info(
-        "[config] market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s",
-        cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
-        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run,
-    )
-    LOGGER.info("[logger] active log file: %s", log_path)
-    LOGGER.info("[trace:file] active order trace file: %s", ORDER_TRACE_FILE)
 
     configuration = lighter.Configuration(host=base_url)
     configuration.api_key = {"default": private_keys[min(private_keys.keys())]}
@@ -1314,6 +1306,20 @@ async def run_strategy() -> None:
         account_index=account_index,
         api_private_keys=private_keys,
     )
+
+    resolved_market_id, resolved_symbol = await resolve_market_id_by_selector(order_api, cfg.market_symbol)
+    cfg.market_id = resolved_market_id
+
+    log_path = setup_logging(cfg.market_id, cfg.side)
+    ORDER_TRACE_FILE = setup_order_trace_file(cfg.market_id, cfg.side)
+    LOGGER.info("[config] using: %s", resolved_cfg_path)
+    LOGGER.info(
+        "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s",
+        cfg.market_symbol, resolved_symbol, cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
+        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run,
+    )
+    LOGGER.info("[logger] active log file: %s", log_path)
+    LOGGER.info("[trace:file] active order trace file: %s", ORDER_TRACE_FILE)
 
     state:      Optional[GridState] = None
     monitor = RuntimeMonitor()

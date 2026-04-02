@@ -5,15 +5,12 @@
     "0": "0xyour_api_private_key_hex"
   },
   "grid": {
-    "marketId": 0,
+    "marketId": "ETH",
     "levels": 4,
     "side": "long",
     "priceStep": 5,
     "baseAmount": 0,
     "leverage": 1,
-    "pollIntervalSec": 5,
-    "maxCycles": 0,
-    "startOrderIndex": 200000,
-    "dryRun": false
+    "pollIntervalSec": 5
   }
 }
