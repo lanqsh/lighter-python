@@ -46,6 +46,7 @@ if str(EXAMPLES_DIR) not in sys.path:
     sys.path.append(str(EXAMPLES_DIR))
 
 import lighter
+from lighter.exceptions import ApiException
 
 # ════════════════════════════════════════════════════════════
 #  常量
@@ -59,6 +60,23 @@ ACTIVE_STATUSES = {"open", "in-progress", "pending"}
 SIDE_LONG = "long"
 SIDE_SHORT = "short"
 LOGGER = logging.getLogger("smart_grid")
+RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+def is_retryable_exception(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return True
+    if isinstance(exc, ApiException):
+        status = getattr(exc, "status", None)
+        if isinstance(status, int) and status in RETRYABLE_HTTP_STATUS:
+            return True
+    text = str(exc).lower()
+    return (
+        "gateway time-out" in text
+        or "gateway timeout" in text
+        or "timed out" in text
+        or "timeout" in text
+    )
 
 
 def setup_logging(market_id: int, side: str) -> Path:
@@ -512,12 +530,30 @@ async def fetch_active_orders(
       o.order_index       : int        —— 交易所分配的 order id
       o.status            : str        —— 'open'/'in-progress'/'pending' 等
     """
-    resp = await order_api.account_active_orders(
-        account_index=account_index,
-        market_id=market_id,
-        auth=auth_token,
-    )
-    return resp.orders or []
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = await order_api.account_active_orders(
+                account_index=account_index,
+                market_id=market_id,
+                auth=auth_token,
+            )
+            return resp.orders or []
+        except Exception as exc:
+            if not is_retryable_exception(exc) or attempt >= max_attempts:
+                raise
+            delay = 0.6 * attempt
+            LOGGER.warning(
+                "[orders:retry] market_id=%s account=%s attempt=%s/%s reason=%s sleep=%.1fs",
+                market_id,
+                account_index,
+                attempt,
+                max_attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    return []
 
 
 async def fetch_position_snapshot(
@@ -565,15 +601,33 @@ async def fetch_recent_trades(
     auth_token: str,
     limit: int = 20,
 ) -> List[Any]:
-    resp = await order_api.trades(
-        sort_by="timestamp",
-        limit=limit,
-        account_index=account_index,
-        market_id=market_id,
-        sort_dir="desc",
-        auth=auth_token,
-    )
-    return resp.trades or []
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = await order_api.trades(
+                sort_by="timestamp",
+                limit=limit,
+                account_index=account_index,
+                market_id=market_id,
+                sort_dir="desc",
+                auth=auth_token,
+            )
+            return resp.trades or []
+        except Exception as exc:
+            if not is_retryable_exception(exc) or attempt >= max_attempts:
+                raise
+            delay = 0.6 * attempt
+            LOGGER.warning(
+                "[trade:retry] market_id=%s account=%s attempt=%s/%s reason=%s sleep=%.1fs",
+                market_id,
+                account_index,
+                attempt,
+                max_attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    return []
 
 
 def summarize_trade(trade: Any, account_index: int) -> str:
@@ -1381,20 +1435,26 @@ async def run_strategy(cfg: GridConfig) -> None:
                 )
                 base_amount = cycle_base_amount
 
-            await run_one_cycle(
-                monitor=monitor,
-                account_api=account_api,
-                client=client,
-                order_api=order_api,
-                state=state,
-                cfg=cfg,
-                current_price=current_price,
-                price_decimals=price_decimals,
-                base_amount=cycle_base_amount,
-                account_index=account_index,
-                auth_mgr=auth_mgr,
-                state_path=state_path,
-            )
+            try:
+                await run_one_cycle(
+                    monitor=monitor,
+                    account_api=account_api,
+                    client=client,
+                    order_api=order_api,
+                    state=state,
+                    cfg=cfg,
+                    current_price=current_price,
+                    price_decimals=price_decimals,
+                    base_amount=cycle_base_amount,
+                    account_index=account_index,
+                    auth_mgr=auth_mgr,
+                    state_path=state_path,
+                )
+            except Exception as e:
+                if is_retryable_exception(e):
+                    LOGGER.warning("[cycle:transient-error] cycle=%s reason=%s", cycle, e)
+                else:
+                    raise
             cycle += 1
 
     finally:
