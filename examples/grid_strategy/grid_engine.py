@@ -128,6 +128,10 @@ async def seed_startup_position_take_profits(
         snapshot.avg_entry_price if snapshot is not None else 0.0,
     )
 
+    # Keep startup-seeded TP away from the nearest grid TP level to avoid
+    # colliding with TP orders that will be created by fresh place fills.
+    startup_tp_offset_steps = 2
+
     for idx, tp_amount in enumerate(tp_amounts, start=1):
         if seeded_count >= cfg.levels:
             LOGGER.info(
@@ -136,7 +140,8 @@ async def seed_startup_position_take_profits(
             )
             break
         is_long = cfg.side == SIDE_LONG
-        tp_price    = aligned + cfg.price_step * idx if is_long else aligned - cfg.price_step * idx
+        tp_steps = idx + startup_tp_offset_steps - 1
+        tp_price    = aligned + cfg.price_step * tp_steps if is_long else aligned - cfg.price_step * tp_steps
         place_price = tp_price - cfg.price_step       if is_long else tp_price + cfg.price_step
         synthetic_place_idx = state.alloc_idx()
         tp_idx = state.alloc_idx()
