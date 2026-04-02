@@ -19,6 +19,8 @@ class GridSlot:
     status:          str = SLOT_IDLE
     place_order_idx: int = 0
     tp_order_idx:    int = 0
+    place_base_amount: int = 0
+    tp_base_amount: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -116,7 +118,6 @@ class GridConfig:
     dry_run:           bool
     leverage:          int = 1
     tp_refill_min_steps: int = 3
-    tp_refill_max_steps: int = 0
     tp_refill_max_steps: int = 0
 
 

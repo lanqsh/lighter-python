@@ -23,6 +23,18 @@ from examples.grid_strategy.trace import now_iso_ms, append_filled_order_trace_r
 LOGGER = logging.getLogger("smart_grid")
 
 
+def get_order_base_amount(order: Any) -> int:
+    for field_name in ("base_amount", "amount", "size"):
+        value = getattr(order, field_name, None)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def should_refill_tp_for_slot(slot: GridSlot, current_price: float, cfg: GridConfig) -> bool:
     if slot.status != SLOT_FILLED or slot.tp_order_idx != 0:
         return False
@@ -151,6 +163,7 @@ async def seed_startup_position_take_profits(
             is_long=is_long,
             status=SLOT_FILLED,
             place_order_idx=synthetic_place_idx,
+            place_base_amount=tp_amount,
         )
         record_order_lifecycle(
             monitor, synthetic_place_idx,
@@ -173,6 +186,7 @@ async def seed_startup_position_take_profits(
             )
             continue
         slot.tp_order_idx = tp_idx
+        slot.tp_base_amount = tp_amount
         slot_map = state.long_slots if is_long else state.short_slots
         slot_map[GridState.price_key(place_price)] = slot
         seeded_count += 1
@@ -229,19 +243,41 @@ async def run_one_cycle(
         if not should_cancel:
             continue
         if order_kind == "entry" and cancel_order_idx in active_set:
+            active_order = active_set[cancel_order_idx]
+            active_order_amount = get_order_base_amount(active_order)
+            if slot.place_base_amount > 0 and active_order_amount != slot.place_base_amount:
+                LOGGER.info(
+                    "[cancel:skip-size-mismatch] kind=entry coi=%s expected=%s actual=%s",
+                    cancel_order_idx,
+                    slot.place_base_amount,
+                    active_order_amount,
+                )
+                continue
             await do_cancel_order(
                 monitor, client, cfg.market_id, cancel_order_idx, cfg.dry_run,
                 f"{'LONG' if slot.is_long else 'SHORT'} entry(far) @{cancel_price:.4f}",
             )
             slot.status = SLOT_IDLE
             slot.place_order_idx = 0
+            slot.place_base_amount = 0
             continue
         if order_kind == "tp" and cancel_order_idx in active_set:
+            active_order = active_set[cancel_order_idx]
+            active_order_amount = get_order_base_amount(active_order)
+            if slot.tp_base_amount > 0 and active_order_amount != slot.tp_base_amount:
+                LOGGER.info(
+                    "[cancel:skip-size-mismatch] kind=tp coi=%s expected=%s actual=%s",
+                    cancel_order_idx,
+                    slot.tp_base_amount,
+                    active_order_amount,
+                )
+                continue
             await do_cancel_order(
                 monitor, client, cfg.market_id, cancel_order_idx, cfg.dry_run,
                 f"{'LONG' if slot.is_long else 'SHORT'} TP(far) @{cancel_price:.4f}",
             )
             slot.tp_order_idx = 0
+            slot.tp_base_amount = 0
 
     # ── Detect entry fills ───────────────────────────────────────────────────
     all_slots = list(active_slots)
@@ -313,6 +349,7 @@ async def run_one_cycle(
         )
         if ok:
             slot.tp_order_idx = tp_idx
+            slot.tp_base_amount = base_amount
             slot.status       = SLOT_FILLED
         else:
             slot.status = SLOT_IDLE
@@ -404,6 +441,7 @@ async def run_one_cycle(
         )
         if ok:
             slot.tp_order_idx = tp_idx
+            slot.tp_base_amount = base_amount
         else:
             LOGGER.warning(
                 "[tp:refill-failed] side=%s tp_price=%.4f min_steps=%s",
@@ -434,6 +472,7 @@ async def run_one_cycle(
             )
             if ok:
                 slot.place_order_idx = place_idx
+                slot.place_base_amount = base_amount
                 slot.status          = SLOT_NEW
     else:
         for i in range(1, cfg.levels + 1):
@@ -456,4 +495,5 @@ async def run_one_cycle(
             )
             if ok:
                 slot.place_order_idx = place_idx
+                slot.place_base_amount = base_amount
                 slot.status          = SLOT_NEW
