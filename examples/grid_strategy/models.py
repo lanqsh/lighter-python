@@ -115,6 +115,9 @@ class GridConfig:
     start_order_index: int
     dry_run:           bool
     leverage:          int = 1
+    tp_refill_min_steps: int = 3
+    tp_refill_max_steps: int = 0
+    tp_refill_max_steps: int = 0
 
 
 def format_position_snapshot(snapshot: Optional[PositionSnapshot]) -> str:

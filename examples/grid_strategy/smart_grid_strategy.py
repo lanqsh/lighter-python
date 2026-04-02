@@ -1,5 +1,6 @@
 
 import asyncio
+import datetime as _dt
 import logging
 import sys
 from pathlib import Path
@@ -51,9 +52,9 @@ async def run_strategy() -> None:
     trace_path = setup_order_trace_file(cfg.market_id, cfg.side)
     LOGGER.info("[config] using: %s", resolved_cfg_path)
     LOGGER.info(
-        "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s",
+        "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s tp_refill_min_steps=%s tp_refill_max_steps=%s",
         cfg.market_symbol, resolved_symbol, cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
-        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run,
+        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run, cfg.tp_refill_min_steps, cfg.tp_refill_max_steps,
     )
     LOGGER.info("[logger] active log file: %s", log_path)
     LOGGER.info("[trace:file] active order trace file: %s", trace_path)
@@ -255,6 +256,16 @@ async def run_strategy() -> None:
                     LOGGER.warning("[cycle:transient-error] cycle=%s reason=%s", cycle, e)
                 else:
                     raise
+
+            today = _dt.date.today().isoformat()
+            today_tp = state.today_tp_count if state.today_tp_date == today else 0
+            LOGGER.info(
+                "[tp:summary] cycle=%s total_tp=%s today_tp=%s(%s)",
+                cycle,
+                state.success_count,
+                today_tp,
+                today,
+            )
             cycle += 1
 
     finally:

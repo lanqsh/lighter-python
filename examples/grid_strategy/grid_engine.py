@@ -23,6 +23,30 @@ from examples.grid_strategy.trace import now_iso_ms, append_filled_order_trace_r
 LOGGER = logging.getLogger("smart_grid")
 
 
+def should_refill_tp_for_slot(slot: GridSlot, current_price: float, cfg: GridConfig) -> bool:
+    if slot.status != SLOT_FILLED or slot.tp_order_idx != 0:
+        return False
+    min_distance = max(0, cfg.tp_refill_min_steps) * cfg.price_step
+    far_cancel_distance = cfg.price_step * cfg.levels * 2
+    auto_max_distance = max(0.0, far_cancel_distance - cfg.price_step)
+    if cfg.tp_refill_max_steps > 0:
+        max_distance = cfg.tp_refill_max_steps * cfg.price_step
+    else:
+        max_distance = auto_max_distance
+
+    distance = abs(slot.tp_price - current_price)
+    if distance < min_distance:
+        return False
+    if max_distance > 0 and distance > max_distance:
+        return False
+    return True
+
+
+def count_side_tp_orders(state: GridState, side: str) -> int:
+    slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    return sum(1 for slot in slots if slot.status == SLOT_FILLED and slot.tp_order_idx > 0)
+
+
 def summarize_active_slots(
     state:      GridState,
     side:       str,
@@ -105,6 +129,12 @@ async def seed_startup_position_take_profits(
     )
 
     for idx, tp_amount in enumerate(tp_amounts, start=1):
+        if seeded_count >= cfg.levels:
+            LOGGER.info(
+                "[startup:position-seed] reached tp cap levels=%s, stop seeding more tp orders",
+                cfg.levels,
+            )
+            break
         is_long = cfg.side == SIDE_LONG
         tp_price    = aligned + cfg.price_step * idx if is_long else aligned - cfg.price_step * idx
         place_price = tp_price - cfg.price_step       if is_long else tp_price + cfg.price_step
@@ -258,6 +288,19 @@ async def run_one_cycle(
         tp_idx  = state.alloc_idx()
         tp_wire = price_to_wire(slot.tp_price, price_decimals)
         label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
+        current_tp_count = count_side_tp_orders(state, side)
+        if current_tp_count >= cfg.levels:
+            LOGGER.info(
+                "[tp:skip-cap] side=%s levels=%s current_tp=%s entry=%.4f tp=%.4f",
+                side,
+                cfg.levels,
+                current_tp_count,
+                slot.place_price,
+                slot.tp_price,
+            )
+            slot.tp_order_idx = 0
+            slot.status = SLOT_FILLED
+            continue
         ok = await do_place_order(
             monitor, client, cfg.market_id, tp_idx, base_amount, price_decimals, tp_wire,
             is_ask=slot.is_long, reduce_only=True, dry_run=cfg.dry_run,
@@ -338,6 +381,31 @@ async def run_one_cycle(
             "LONG" if slot.is_long else "SHORT", state.success_count,
             state.today_tp_count, state.today_tp_date, slot.place_price, slot.tp_price,
         )
+
+    # ── Refill missing TP only when TP level is far enough from current price ─
+    all_slots = list(active_slots)
+    for slot in all_slots:
+        if count_side_tp_orders(state, side) >= cfg.levels:
+            break
+        if not should_refill_tp_for_slot(slot, current_price, cfg):
+            continue
+        tp_idx = state.alloc_idx()
+        label = f"{'LONG' if slot.is_long else 'SHORT'} TP(refill) @{slot.tp_price:.4f}"
+        ok = await do_place_order(
+            monitor, client, cfg.market_id, tp_idx, base_amount, price_decimals,
+            price_to_wire(slot.tp_price, price_decimals),
+            is_ask=slot.is_long, reduce_only=True, dry_run=cfg.dry_run,
+            label=label, slot=slot, slot_kind="tp",
+        )
+        if ok:
+            slot.tp_order_idx = tp_idx
+        else:
+            LOGGER.warning(
+                "[tp:refill-failed] side=%s tp_price=%.4f min_steps=%s",
+                "LONG" if slot.is_long else "SHORT",
+                slot.tp_price,
+                cfg.tp_refill_min_steps,
+            )
 
     # ── Place new entry orders to fill grid ──────────────────────────────────
     if side == SIDE_LONG:

@@ -55,6 +55,8 @@ def load_grid_config(resolved_config_file: str) -> GridConfig:
         ("leverage",          "leverage",         int),
         ("base_amount",       "baseAmount",       int),
         ("poll_interval_sec", "pollIntervalSec",  float),
+        ("tp_refill_min_steps", "tpRefillMinSteps", int),
+        ("tp_refill_max_steps", "tpRefillMaxSteps", int),
     ]:
         if file_cfg.get(key) is not None:
             setattr(cfg, attr, conv(file_cfg[key]))
