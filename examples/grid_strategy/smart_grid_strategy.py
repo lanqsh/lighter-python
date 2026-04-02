@@ -172,12 +172,12 @@ class TradeEvidence:
 
 
 # ════════════════════════════════════════════════════════════
-#  GridState  —— 持有全部格子，负责序列化/反序列化
+#  GridState  —— 持有当前运行中的全部格子状态
 # ════════════════════════════════════════════════════════════
 class GridState:
     def __init__(self, start_order_index: int):
         self.long_slots:    Dict[str, GridSlot] = {}   # key = f"{place_price:.6f}"
-        self.short_slots:   Dict[str, GridSlot] = {}
+        self.short_slots:   Dict[str, GridSlot] = {}   # key = f"{place_price:.6f}"
         self.next_order_idx: int = start_order_index
         self.success_count:  int = 0
         self.today_tp_count: int = 0         # 当日 TP 次数，跨天自动归零
@@ -202,40 +202,6 @@ class GridState:
         return (f"long(new={ln} filled={lf}) "
                 f"short(new={sn} filled={sf}) "
                 f"next_idx={self.next_order_idx} trades={self.success_count}")
-
-    # ── persistence ─────────────────────────────────────────
-    def save(self, path: Path) -> None:
-        data = {
-            "next_order_idx":  self.next_order_idx,
-            "success_count":   self.success_count,
-            "today_tp_count":  self.today_tp_count,
-            "today_tp_date":   self.today_tp_date,
-            "long_slots":  {k: v.to_dict() for k, v in self.long_slots.items()},
-            "short_slots": {k: v.to_dict() for k, v in self.short_slots.items()},
-        }
-        tmp = path.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        tmp.replace(path)
-
-    @classmethod
-    def load(cls, path: Path, start_order_index: int) -> Optional["GridState"]:
-        if not path.exists():
-            return None
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            state = cls(start_order_index)
-            state.next_order_idx = int(data.get("next_order_idx", start_order_index))
-            state.success_count  = int(data.get("success_count", 0))
-            state.today_tp_count = int(data.get("today_tp_count", 0))
-            state.today_tp_date  = str(data.get("today_tp_date", ""))
-            state.long_slots  = {k: GridSlot.from_dict(v) for k, v in data.get("long_slots", {}).items()}
-            state.short_slots = {k: GridSlot.from_dict(v) for k, v in data.get("short_slots", {}).items()}
-            return state
-        except Exception as e:
-            LOGGER.warning("Failed to load state file (%s), will rebuild from exchange.", e)
-            return None
 
 
 # ════════════════════════════════════════════════════════════
@@ -491,11 +457,6 @@ def resolve_effective_base_amount(
     return effective_base, required_base, len(entry_prices), min_entry_price
 
 
-def state_file_path(config_file: str, market_id: int, side: str) -> Path:
-    """状态文件路径：固定存放在当前工作目录，并按方向隔离。"""
-    return Path.cwd() / f"grid_state_market{market_id}_{side}.json"
-
-
 # ════════════════════════════════════════════════════════════
 #  交易所 helpers
 # ════════════════════════════════════════════════════════════
@@ -736,82 +697,6 @@ class AuthTokenManager:
 
 
 # ════════════════════════════════════════════════════════════
-#  从交易所活跃订单重建 GridState（无状态文件时调用）
-#  对应 C++: InitLongPlaceOrders / InitLongTpOrders / ...
-# ════════════════════════════════════════════════════════════
-def build_state_from_exchange(
-    active_orders:     List[Any],
-    price_step:        float,
-    price_decimals:    int,
-    start_order_index: int,
-    side:              str,
-) -> GridState:
-    """
-    识别规则（依赖 reduce_only=True 标记止盈单）：
-      is_ask=False, reduce_only=False  →  多方开仓单  → long_slots[entry_price].NEW
-      is_ask=True,  reduce_only=True   →  多方止盈单  → long_slots[price-step].FILLED
-      is_ask=True,  reduce_only=False  →  空方开仓单  → short_slots[entry_price].NEW
-      is_ask=False, reduce_only=True   →  空方止盈单  → short_slots[price+step].FILLED
-
-    注意：Order.price 是 StrictStr（wire 格式），必须通过 wire_price_to_float() 换算。
-    """
-    state   = GridState(start_order_index)
-    max_idx = start_order_index - 1
-    side = normalize_side(side)
-
-    for o in active_orders:
-        coi         = int(o.client_order_index)
-        # Order.price 是 wire 格式字符串，必须换算为人类可读价格
-        price       = wire_price_to_float(o.price, price_decimals)
-        is_ask      = bool(o.is_ask)
-        reduce_only = bool(o.reduce_only)
-        max_idx     = max(max_idx, coi)
-
-        if side == SIDE_LONG and not is_ask and not reduce_only:
-            # 多方开仓 BUY open
-            k    = GridState.price_key(price)
-            slot = state.long_slots.setdefault(
-                k, GridSlot(place_price=price, tp_price=price + price_step, is_long=True))
-            slot.status          = SLOT_NEW
-            slot.place_order_idx = coi
-            LOGGER.info("[rebuild] LONG entry @%.4f coi=%s", price, coi)
-
-        elif side == SIDE_LONG and is_ask and reduce_only:
-            # 多方止盈 SELL reduce_only，对应开仓价 = tp_price - price_step
-            entry_price = price - price_step
-            k    = GridState.price_key(entry_price)
-            slot = state.long_slots.setdefault(
-                k, GridSlot(place_price=entry_price, tp_price=price, is_long=True))
-            slot.status       = SLOT_FILLED
-            slot.tp_order_idx = coi
-            slot.tp_price     = price
-            LOGGER.info("[rebuild] LONG tp @%.4f entry=%.4f coi=%s", price, entry_price, coi)
-
-        elif side == SIDE_SHORT and is_ask and not reduce_only:
-            # 空方开仓 SELL open
-            k    = GridState.price_key(price)
-            slot = state.short_slots.setdefault(
-                k, GridSlot(place_price=price, tp_price=price - price_step, is_long=False))
-            slot.status          = SLOT_NEW
-            slot.place_order_idx = coi
-            LOGGER.info("[rebuild] SHORT entry @%.4f coi=%s", price, coi)
-
-        elif side == SIDE_SHORT and not is_ask and reduce_only:
-            # 空方止盈 BUY reduce_only，对应开仓价 = tp_price + price_step
-            entry_price = price + price_step
-            k    = GridState.price_key(entry_price)
-            slot = state.short_slots.setdefault(
-                k, GridSlot(place_price=entry_price, tp_price=price, is_long=False))
-            slot.status       = SLOT_FILLED
-            slot.tp_order_idx = coi
-            slot.tp_price     = price
-            LOGGER.info("[rebuild] SHORT tp @%.4f entry=%.4f coi=%s", price, entry_price, coi)
-
-    state.next_order_idx = max_idx + 1
-    return state
-
-
-# ════════════════════════════════════════════════════════════
 #  下单 / 撤单封装
 # ════════════════════════════════════════════════════════════
 async def do_place_order(
@@ -896,6 +781,63 @@ async def do_cancel_order(
     )
 
 
+async def cancel_all_active_orders_for_market(
+    order_api: lighter.OrderApi,
+    client: lighter.SignerClient,
+    auth_mgr: "AuthTokenManager",
+    account_index: int,
+    market_id: int,
+    reason: str,
+    dry_run: bool,
+) -> int:
+    auth_token = await auth_mgr.get()
+    active_orders = await fetch_active_orders(order_api, account_index, market_id, auth_token)
+    total = len(active_orders)
+    LOGGER.info("[cleanup:%s] market_id=%s active_orders=%s", reason, market_id, total)
+    if total == 0:
+        return 0
+
+    canceled = 0
+    for order in active_orders:
+        exchange_order_index = int(order.order_index)
+        client_order_index = int(order.client_order_index)
+        if dry_run:
+            LOGGER.info(
+                "[cleanup:%s:dry-run] market_id=%s order_index=%s coi=%s",
+                reason,
+                market_id,
+                exchange_order_index,
+                client_order_index,
+            )
+            continue
+        try:
+            _, tx_hash, err = await client.cancel_order(
+                market_index=market_id,
+                order_index=exchange_order_index,
+            )
+            LOGGER.info(
+                "[cleanup:%s] cancel market=%s order_index=%s coi=%s tx_hash=%s err=%s",
+                reason,
+                market_id,
+                exchange_order_index,
+                client_order_index,
+                tx_hash,
+                err,
+            )
+            if err is None:
+                canceled += 1
+        except Exception as exc:
+            LOGGER.warning(
+                "[cleanup:%s] cancel failed market=%s order_index=%s coi=%s reason=%s",
+                reason,
+                market_id,
+                exchange_order_index,
+                client_order_index,
+                exc,
+            )
+    return canceled
+
+
 # ════════════════════════════════════════════════════════════
 #  单轮主循环  ——  对应 C++ RunGrid()
 # ════════════════════════════════════════════════════════════
@@ -911,7 +853,6 @@ async def run_one_cycle(
     base_amount:    int,
     account_index:  int,
     auth_mgr:       AuthTokenManager,
-    state_path:     Path,
 ) -> None:
     side = normalize_side(cfg.side)
 
@@ -1202,13 +1143,6 @@ async def run_one_cycle(
                 slot.place_order_idx = place_idx
                 slot.status          = SLOT_NEW
 
-    # ──────────────────────────────────────────────────────
-    # 4. 持久化状态
-    # ──────────────────────────────────────────────────────
-    if not cfg.dry_run:
-        state.save(state_path)
-
-
 # ════════════════════════════════════════════════════════════
 #  主入口
 # ════════════════════════════════════════════════════════════
@@ -1258,8 +1192,8 @@ async def run_strategy(cfg: GridConfig) -> None:
     )
 
     state:      Optional[GridState] = None
-    state_path: Path                = state_file_path(cfg.config_file, cfg.market_id, cfg.side)
     monitor = RuntimeMonitor()
+    auth_mgr = AuthTokenManager(client, ttl_sec=3600)
 
     try:
         err = client.check_client()
@@ -1365,24 +1299,25 @@ async def run_strategy(cfg: GridConfig) -> None:
                 min_entry_text,
             )
 
-        # ── Auth token ───────────────────────────────────
-        auth_mgr = AuthTokenManager(client, ttl_sec=3600)
+        # ── 启动即清理当前交易对所有挂单（保留仓位） ───────────────
+        canceled_on_start = await cancel_all_active_orders_for_market(
+            order_api=order_api,
+            client=client,
+            auth_mgr=auth_mgr,
+            account_index=account_index,
+            market_id=cfg.market_id,
+            reason="startup",
+            dry_run=cfg.dry_run,
+        )
+        LOGGER.info(
+            "[cleanup:startup] done market_id=%s canceled=%s (positions untouched)",
+            cfg.market_id,
+            canceled_on_start,
+        )
 
-        # ── 加载 / 重建状态 ──────────────────────────────
-        LOGGER.info("Loading strategy state: %s", state_path)
-        state = GridState.load(state_path, cfg.start_order_index)
-
-        if state is not None:
-            LOGGER.info("State loaded: %s", state.summary())
-            LOGGER.info("Will verify against exchange on first cycle ...")
-        else:
-            LOGGER.info("No state file. Rebuilding from exchange active orders ...")
-            auth_token    = await auth_mgr.get()
-            active_orders = await fetch_active_orders(
-                order_api, account_index, cfg.market_id, auth_token)
-            LOGGER.info("Found %s active orders on exchange.", len(active_orders))
-            state = build_state_from_exchange(
-                active_orders, cfg.price_step, price_decimals, cfg.start_order_index, cfg.side)
+        # 每次启动都创建全新网格状态，不读取/写入 state 文件
+        state = GridState(cfg.start_order_index)
+        LOGGER.info("[state] fresh start enabled (no state file load/save)")
 
         await initialize_runtime_monitor(
             monitor=monitor,
@@ -1448,7 +1383,6 @@ async def run_strategy(cfg: GridConfig) -> None:
                     base_amount=cycle_base_amount,
                     account_index=account_index,
                     auth_mgr=auth_mgr,
-                    state_path=state_path,
                 )
             except Exception as e:
                 if is_retryable_exception(e):
@@ -1460,10 +1394,23 @@ async def run_strategy(cfg: GridConfig) -> None:
     finally:
         trades = state.success_count if state is not None else 0
         LOGGER.info("Exiting. Completed trades: %s", trades)
-        LOGGER.info("Active orders remain on exchange (no cancellation on exit).")
-        if state is not None and not cfg.dry_run:
-            state.save(state_path)
-            LOGGER.info("State saved: %s", state_path)
+        try:
+            canceled_on_exit = await cancel_all_active_orders_for_market(
+                order_api=order_api,
+                client=client,
+                auth_mgr=auth_mgr,
+                account_index=account_index,
+                market_id=cfg.market_id,
+                reason="shutdown",
+                dry_run=cfg.dry_run,
+            )
+            LOGGER.info(
+                "[cleanup:shutdown] done market_id=%s canceled=%s (positions untouched)",
+                cfg.market_id,
+                canceled_on_exit,
+            )
+        except Exception as cleanup_exc:
+            LOGGER.warning("[cleanup:shutdown] failed market_id=%s reason=%s", cfg.market_id, cleanup_exc)
         for c, name in [(client, "SignerClient"), (api_client, "ApiClient")]:
             try:
                 await c.close()

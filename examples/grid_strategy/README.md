@@ -5,7 +5,7 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 | 文件 | 说明 |
 |------|------|
 | `simple_grid_strategy.py` | 基础网格策略（双向，无状态持久化） |
-| `smart_grid_strategy.py` | **推荐** 智能单向网格策略（有状态持久化、自动止盈、日志监控） |
+| `smart_grid_strategy.py` | **推荐** 智能单向网格策略（无状态新网格、自动止盈、日志监控） |
 | `api_key_config.example.json` | 配置文件示例 |
 | `query_doge_market.py` | 查询指定市场的 marketId、精度、最小下单量等信息 |
 
@@ -17,7 +17,8 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 
 - **单向网格**：通过 `side=long/short` 配置，只做多或只做空，适配 DEX 单向持仓模式
 - **自动止盈**：开仓单成交后自动在 `entry+price_step` 挂止盈单
-- **状态持久化**：策略状态保存为 JSON 文件，重启后自动接管，不丢失格子状态
+- **无状态新网格**：每次启动都视为新的网格会话，不读取历史状态文件
+- **启动/退出自动清挂单**：仅取消当前交易对挂单，保留已有仓位不动
 - **全仓模式**：设置杠杆时自动使用全仓（cross margin）
 - **最小下单量兜底**：`baseAmount=0` 时按最深网格价自动计算满足交易所最小名义金额的数量；配置值偏小时自动抬升并打印警告
 - **杠杆上限保护**：超过市场允许的最大杠杆时自动降至上限
@@ -49,7 +50,7 @@ cd examples/grid_strategy
 python smart_grid_strategy.py
 ```
 
-> 策略运行目录必须包含 `api_key_config.json`，状态文件和日志也会写入该目录。
+> 策略运行目录必须包含 `api_key_config.json`，日志会写入该目录下的 `logs/`。
 
 ### 配置文件
 
@@ -100,12 +101,16 @@ baseAmount = 目标数量 × 10^size_decimals
 
 设为 `0` 时，策略会自动根据最深网格价和交易所 `min_quote_amount` 计算出所有档位都合法的最小数量。
 
-### 日志与状态文件
+### 日志与运行行为
 
 | 文件 | 说明 |
 |------|------|
 | `logs/smart_grid_market{id}_{side}.log` | 滚动日志（最大 10MB × 5 个备份） |
-| `grid_state_market{id}_{side}.json` | 策略状态（格子状态、TP 统计，重启后自动加载） |
+
+运行行为：
+- 启动时：取消当前交易对全部挂单，不处理已有仓位
+- 运行中：按当前参数创建新的单向网格
+- 退出时：再次取消当前交易对全部挂单，不处理已有仓位
 
 TP 成交日志示例：
 ```
