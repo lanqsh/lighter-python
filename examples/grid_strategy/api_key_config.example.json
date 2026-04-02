@@ -9,9 +9,11 @@
     "levels": 4,
     "side": "long",
     "priceStep": 5,
-    "rebalanceThreshold": 10,
     "baseAmount": 0,
-    "clearOnStart": true,
-    "leverage": 1
+    "leverage": 1,
+    "pollIntervalSec": 5,
+    "maxCycles": 0,
+    "startOrderIndex": 200000,
+    "dryRun": false
   }
 }

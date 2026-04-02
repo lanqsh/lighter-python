@@ -36,21 +36,14 @@ cp examples/grid_strategy/api_key_config.example.json \
 # 编辑 api_key_config.json，填入真实的 baseUrl / accountIndex / privateKeys
 ```
 
-模拟运行（不下真实订单）：
-
-```bash
-cd examples/grid_strategy
-python smart_grid_strategy.py --dry-run
-```
-
-实盘运行（先用测试网验证）：
+配置完成后直接运行：
 
 ```bash
 cd examples/grid_strategy
 python smart_grid_strategy.py
 ```
 
-> 策略运行目录必须包含 `api_key_config.json`，日志会写入该目录下的 `logs/`。
+> `smart_grid_strategy.py` 不再支持命令行参数，所有运行参数都必须写在 `api_key_config.json` 的 `grid` 字段里。策略运行目录必须包含 `api_key_config.json`，日志会写入该目录下的 `logs/`。
 
 ### 配置文件
 
@@ -69,25 +62,29 @@ python smart_grid_strategy.py
     "levels": 5,
     "priceStep": 10,
     "baseAmount": 0,
-    "leverage": 3
+    "leverage": 3,
+    "pollIntervalSec": 5,
+    "maxCycles": 0,
+    "startOrderIndex": 200000,
+    "dryRun": false
   }
 }
 ```
 
-### 参数说明
+### 配置项说明
 
-| 参数（命令行） | 配置文件键 | 默认值 | 说明 |
+| 配置文件键 | 默认值 | 说明 |
 |---|---|---|---|
-| `--market-id` | `marketId` | `0` | 市场 ID（可用 `query_doge_market.py` 查询） |
-| `--side` | `side` | `long` | 仓位方向：`long` 或 `short` |
-| `--levels` | `levels` | `10` | 网格层数 |
-| `--price-step` | `priceStep` | `10.0` | 相邻格子价差（human units，如 ETH 填 `10` 表示 $10） |
-| `--base-amount` | `baseAmount` | `0` | 每格下单数量（wire 整数）。`0` = 按最深网格价自动计算最小合法数量 |
-| `--leverage` | `leverage` | `1` | 杠杆倍数；超过市场上限自动降至上限 |
-| `--poll-interval-sec` | — | `5.0` | 每轮轮询间隔（秒） |
-| `--max-cycles` | — | `0` | 最大循环次数，`0` = 永久运行 |
-| `--start-order-index` | — | `200000` | 策略使用的起始 client_order_index |
-| `--dry-run` | — | `false` | 模拟运行，不提交真实订单 |
+| `marketId` | `0` | 市场 ID（可用 `query_doge_market.py` 查询） |
+| `side` | `long` | 仓位方向：`long` 或 `short` |
+| `levels` | `10` | 网格层数 |
+| `priceStep` | `10.0` | 相邻格子价差（human units，如 ETH 填 `10` 表示 $10） |
+| `baseAmount` | `0` | 每格下单数量（wire 整数）。`0` = 按最深网格价自动计算最小合法数量 |
+| `leverage` | `1` | 杠杆倍数；超过市场上限自动降至上限 |
+| `pollIntervalSec` | `5.0` | 每轮轮询间隔（秒） |
+| `maxCycles` | `0` | 最大循环次数，`0` = 永久运行 |
+| `startOrderIndex` | `200000` | 策略使用的起始 client_order_index |
+| `dryRun` | `false` | 模拟运行，不提交真实订单 |
 
 ### baseAmount 填写说明
 
@@ -119,6 +116,6 @@ TP 成交日志示例：
 
 ### 安全建议
 
-- 先用 `--dry-run` 验证参数和行为
+- 先在配置文件里设置 `"dryRun": true` 验证参数和行为
 - 先在测试网（testnet）运行稳定后再切主网
 - 本策略仅为示例，不构成投资建议
