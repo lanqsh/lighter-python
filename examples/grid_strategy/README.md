@@ -7,7 +7,7 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 | `simple_grid_strategy.py` | 基础网格策略（双向，无状态持久化） |
 | `smart_grid_strategy.py` | **推荐** 智能单向网格策略（无状态新网格、自动止盈、日志监控） |
 | `api_key_config.example.json` | 配置文件示例 |
-| `query_doge_market.py` | 查询指定市场的 marketId、精度、最小下单量等信息 |
+| `market_utils.py` | 查询指定市场的 marketId、精度、最小下单量等信息 |
 
 ---
 
@@ -28,6 +28,18 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 
 ### 快速开始
 
+```bash
+apt update
+apt install -y python3-venv python3-pip
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -r requirements.txt
+python -m pip install -e .
+
+source .venv/bin/activate
+```
+
 将示例配置复制为实际配置：
 
 ```bash
@@ -39,11 +51,16 @@ cp examples/grid_strategy/api_key_config.example.json \
 配置完成后直接运行：
 
 ```bash
-cd examples/grid_strategy
-python smart_grid_strategy.py
+python -m examples.grid_strategy.smart_grid_strategy
 ```
 
-> `smart_grid_strategy.py` 不再支持命令行参数，所有运行参数都必须写在 `api_key_config.json` 的 `grid` 字段里。策略运行目录必须包含 `api_key_config.json`，日志会写入该目录下的 `logs/`。
+也支持包级入口：
+
+```bash
+python -m examples.grid_strategy
+```
+
+`smart_grid_strategy.py` 不再支持命令行参数，所有运行参数都必须写在 `api_key_config.json` 的 `grid` 字段里。配置文件会按以下顺序查找：当前工作目录、`examples/grid_strategy/`。日志会写入当前工作目录下的 `logs/`。
 
 ### 配置文件
 
@@ -57,16 +74,13 @@ python smart_grid_strategy.py
     "0": "0xyour_api_private_key_hex"
   },
   "grid": {
-    "marketId": 0,
+    "marketId": "ETH",
     "side": "long",
     "levels": 5,
     "priceStep": 10,
     "baseAmount": 0,
     "leverage": 3,
-    "pollIntervalSec": 5,
-    "maxCycles": 0,
-    "startOrderIndex": 200000,
-    "dryRun": false
+    "pollIntervalSec": 5
   }
 }
 ```
@@ -74,17 +88,14 @@ python smart_grid_strategy.py
 ### 配置项说明
 
 | 配置文件键 | 默认值 | 说明 |
-|---|---|---|---|
-| `marketId` | `0` | 市场 ID（可用 `query_doge_market.py` 查询） |
+|---|---|---|
+| `marketId` | `"0"` | 市场选择器，可填市场 ID 或符号前缀，如 `"ETH"` |
 | `side` | `long` | 仓位方向：`long` 或 `short` |
 | `levels` | `10` | 网格层数 |
 | `priceStep` | `10.0` | 相邻格子价差（human units，如 ETH 填 `10` 表示 $10） |
 | `baseAmount` | `0` | 每格下单数量（wire 整数）。`0` = 按最深网格价自动计算最小合法数量 |
 | `leverage` | `1` | 杠杆倍数；超过市场上限自动降至上限 |
 | `pollIntervalSec` | `5.0` | 每轮轮询间隔（秒） |
-| `maxCycles` | `0` | 最大循环次数，`0` = 永久运行 |
-| `startOrderIndex` | `200000` | 策略使用的起始 client_order_index |
-| `dryRun` | `false` | 模拟运行，不提交真实订单 |
 
 ### baseAmount 填写说明
 

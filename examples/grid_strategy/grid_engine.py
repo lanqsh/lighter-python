@@ -1,0 +1,386 @@
+import asyncio
+import datetime as _dt
+import logging
+from typing import Any, Dict, List
+
+import lighter
+
+from examples.grid_strategy.auth import AuthTokenManager
+from examples.grid_strategy.config import normalize_side
+from examples.grid_strategy.exchange import fetch_active_orders, collect_trade_evidence
+from examples.grid_strategy.models import (
+    GridSlot, GridState, GridConfig, RuntimeMonitor, TradeEvidence,
+    SLOT_IDLE, SLOT_NEW, SLOT_FILLED, SIDE_LONG, SIDE_SHORT,
+    position_size_signed,
+)
+from examples.grid_strategy.order_executor import do_place_order, do_cancel_order, record_order_lifecycle
+from examples.grid_strategy.price_utils import (
+    price_to_wire, size_to_wire,
+    split_position_amounts, should_cancel_far_order,
+)
+from examples.grid_strategy.trace import now_iso_ms, append_filled_order_trace_record
+
+LOGGER = logging.getLogger("smart_grid")
+
+
+def summarize_active_slots(
+    state:      GridState,
+    side:       str,
+    active_set: Dict[int, Any],
+    max_items:  int = 12,
+) -> str:
+    slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    rows: List = []
+    for slot in slots:
+        if slot.status == SLOT_NEW and slot.place_order_idx in active_set:
+            rows.append((slot.place_price, f"ENTRY#{slot.place_order_idx}@{slot.place_price:.2f}->tp{slot.tp_price:.2f}"))
+        elif slot.status == SLOT_FILLED and slot.tp_order_idx in active_set:
+            rows.append((slot.tp_price, f"TP#{slot.tp_order_idx}@{slot.tp_price:.2f}(entry{slot.place_price:.2f})"))
+    rows.sort(key=lambda x: x[0])
+    if not rows:
+        return "none"
+    body = " | ".join(text for _, text in rows[:max_items])
+    more = "" if len(rows) <= max_items else f" | ...(+{len(rows) - max_items})"
+    return body + more
+
+
+def evidence_confirms_entry_fill(slot: GridSlot, evidence: TradeEvidence) -> bool:
+    if slot.place_order_idx in evidence.new_trade_client_ids:
+        return True
+    before = position_size_signed(evidence.position_before)
+    after  = position_size_signed(evidence.position_after)
+    delta  = after - before
+    return delta > 0 if slot.is_long else delta < 0
+
+
+def evidence_confirms_tp_fill(slot: GridSlot, evidence: TradeEvidence) -> bool:
+    if slot.tp_order_idx in evidence.new_trade_client_ids:
+        return True
+    before = position_size_signed(evidence.position_before)
+    after  = position_size_signed(evidence.position_after)
+    delta  = after - before
+    return delta < 0 if slot.is_long else delta > 0
+
+
+async def seed_startup_position_take_profits(
+    monitor:         RuntimeMonitor,
+    client:          lighter.SignerClient,
+    state:           GridState,
+    cfg:             GridConfig,
+    current_price:   float,
+    price_decimals:  int,
+    size_decimals:   int,
+    base_amount:     int,
+    min_base_amount: float,
+) -> int:
+    snapshot = monitor.last_position
+    signed_position = position_size_signed(snapshot)
+    if snapshot is None or signed_position == 0:
+        LOGGER.info("[startup:position-seed] no existing position to seed")
+        return 0
+
+    if cfg.side == SIDE_LONG and signed_position <= 0:
+        LOGGER.info("[startup:position-seed] existing position is not long, skip side=%s position=%s", cfg.side, signed_position)
+        return 0
+    if cfg.side == SIDE_SHORT and signed_position >= 0:
+        LOGGER.info("[startup:position-seed] existing position is not short, skip side=%s position=%s", cfg.side, signed_position)
+        return 0
+
+    total_position_wire = size_to_wire(abs(signed_position), size_decimals)
+    min_base_wire = max(1, size_to_wire(min_base_amount, size_decimals))
+    tp_amounts = split_position_amounts(total_position_wire, base_amount, min_base_wire)
+    if not tp_amounts:
+        LOGGER.info(
+            "[startup:position-seed] position exists but no valid tp chunks side=%s position=%s total_wire=%s",
+            cfg.side, signed_position, total_position_wire,
+        )
+        return 0
+
+    aligned = (int(current_price / cfg.price_step)) * cfg.price_step
+    seeded_count = 0
+    LOGGER.info(
+        "[startup:position-seed] side=%s signed_position=%s total_wire=%s tp_chunks=%s aligned=%.4f avg_entry=%.4f",
+        cfg.side, signed_position, total_position_wire, tp_amounts, aligned,
+        snapshot.avg_entry_price if snapshot is not None else 0.0,
+    )
+
+    for idx, tp_amount in enumerate(tp_amounts, start=1):
+        is_long = cfg.side == SIDE_LONG
+        tp_price    = aligned + cfg.price_step * idx if is_long else aligned - cfg.price_step * idx
+        place_price = tp_price - cfg.price_step       if is_long else tp_price + cfg.price_step
+        synthetic_place_idx = state.alloc_idx()
+        tp_idx = state.alloc_idx()
+        slot = GridSlot(
+            place_price=place_price,
+            tp_price=tp_price,
+            is_long=is_long,
+            status=SLOT_FILLED,
+            place_order_idx=synthetic_place_idx,
+        )
+        record_order_lifecycle(
+            monitor, synthetic_place_idx,
+            f"{'LONG' if is_long else 'SHORT'} startup entry @{place_price:.4f}",
+            "startup-position-seeded",
+            not is_long, False, slot=slot, slot_kind="entry",
+        )
+        ok = await do_place_order(
+            monitor=monitor, client=client, market_id=cfg.market_id,
+            order_idx=tp_idx, base_amount=tp_amount, price_decimals=price_decimals,
+            wire_price=price_to_wire(tp_price, price_decimals),
+            is_ask=is_long, reduce_only=True, dry_run=cfg.dry_run,
+            label=f"{'LONG' if is_long else 'SHORT'} startup TP @{tp_price:.4f}",
+            slot=slot, slot_kind="tp",
+        )
+        if not ok:
+            LOGGER.warning(
+                "[startup:position-seed] failed to place tp side=%s tp_price=%.4f amount=%s linked_place=%s",
+                cfg.side, tp_price, tp_amount, synthetic_place_idx,
+            )
+            continue
+        slot.tp_order_idx = tp_idx
+        slot_map = state.long_slots if is_long else state.short_slots
+        slot_map[GridState.price_key(place_price)] = slot
+        seeded_count += 1
+
+    LOGGER.info("[startup:position-seed] seeded_tp_orders=%s side=%s", seeded_count, cfg.side)
+    return seeded_count
+
+
+async def run_one_cycle(
+    monitor:        RuntimeMonitor,
+    account_api:    lighter.AccountApi,
+    client:         lighter.SignerClient,
+    order_api:      lighter.OrderApi,
+    state:          GridState,
+    cfg:            GridConfig,
+    current_price:  float,
+    price_decimals: int,
+    base_amount:    int,
+    account_index:  int,
+    auth_mgr:       AuthTokenManager,
+) -> None:
+    side = normalize_side(cfg.side)
+
+    auth_token    = await auth_mgr.get()
+    active_orders = await fetch_active_orders(order_api, account_index, cfg.market_id, auth_token)
+    active_set: Dict[int, Any] = {int(o.client_order_index): o for o in active_orders}
+    LOGGER.info("[orders:active] count=%s market_id=%s side=%s", len(active_orders), cfg.market_id, side)
+    LOGGER.info("[slots:active] %s", summarize_active_slots(state, side, active_set))
+
+    evidence = await collect_trade_evidence(
+        monitor=monitor, account_api=account_api, order_api=order_api,
+        auth_mgr=auth_mgr, account_index=account_index, market_id=cfg.market_id,
+    )
+    for active_order in active_orders:
+        active_coi = int(active_order.client_order_index)
+        lifecycle  = monitor.order_lifecycles.get(active_coi)
+        record_order_lifecycle(
+            monitor, active_coi,
+            lifecycle.label if lifecycle is not None else f"exchange-order-{active_coi}",
+            f"active:{active_order.status}",
+            bool(active_order.is_ask), bool(active_order.reduce_only),
+            slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
+        )
+
+    aligned       = (int(current_price / cfg.price_step)) * cfg.price_step
+    far_threshold = cfg.price_step * cfg.levels * 2
+
+    # ── Cancel orders that have drifted too far from current price ──────────
+    active_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    for slot in list(active_slots):
+        should_cancel, order_kind, cancel_order_idx, cancel_price = should_cancel_far_order(
+            slot, side, aligned, far_threshold
+        )
+        if not should_cancel:
+            continue
+        if order_kind == "entry" and cancel_order_idx in active_set:
+            await do_cancel_order(
+                monitor, client, cfg.market_id, cancel_order_idx, cfg.dry_run,
+                f"{'LONG' if slot.is_long else 'SHORT'} entry(far) @{cancel_price:.4f}",
+            )
+            slot.status = SLOT_IDLE
+            slot.place_order_idx = 0
+            continue
+        if order_kind == "tp" and cancel_order_idx in active_set:
+            await do_cancel_order(
+                monitor, client, cfg.market_id, cancel_order_idx, cfg.dry_run,
+                f"{'LONG' if slot.is_long else 'SHORT'} TP(far) @{cancel_price:.4f}",
+            )
+            slot.tp_order_idx = 0
+
+    # ── Detect entry fills ───────────────────────────────────────────────────
+    all_slots = list(active_slots)
+    for slot in all_slots:
+        if slot.status != SLOT_NEW:
+            continue
+        if slot.place_order_idx in active_set:
+            continue
+        LOGGER.info(
+            "[fill:candidate] entry_order_disappeared side=%s entry_price=%.4f coi=%s",
+            "LONG" if slot.is_long else "SHORT", slot.place_price, slot.place_order_idx,
+        )
+        record_order_lifecycle(
+            monitor, slot.place_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            "disappeared-from-active", not slot.is_long, False, slot=slot, slot_kind="entry",
+        )
+        if not evidence_confirms_entry_fill(slot, evidence):
+            LOGGER.warning(
+                "[fill:rejected] side=%s entry_price=%.4f coi=%s reason=no trade/position evidence",
+                "LONG" if slot.is_long else "SHORT", slot.place_price, slot.place_order_idx,
+            )
+            record_order_lifecycle(
+                monitor, slot.place_order_idx,
+                f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+                "disappeared-without-fill-evidence", not slot.is_long, False,
+                slot=slot, slot_kind="entry",
+            )
+            slot.status = SLOT_IDLE
+            continue
+        record_order_lifecycle(
+            monitor, slot.place_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            "fill-confirmed", not slot.is_long, False, slot=slot, slot_kind="entry",
+        )
+        append_filled_order_trace_record(
+            market_id=cfg.market_id, order_kind="entry",
+            label=f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            client_order_index=slot.place_order_idx, linked_place_order_index=0,
+            price_wire=price_to_wire(slot.place_price, price_decimals),
+            price_decimals=price_decimals, base_amount=base_amount,
+            is_ask=not slot.is_long, reduce_only=False,
+            slot=slot, monitor=monitor,
+            place_time=monitor.order_submit_times.get(slot.place_order_idx, ""),
+            fill_time=now_iso_ms(),
+        )
+        monitor.order_submit_times.pop(slot.place_order_idx, None)
+
+        tp_idx  = state.alloc_idx()
+        tp_wire = price_to_wire(slot.tp_price, price_decimals)
+        label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
+        ok = await do_place_order(
+            monitor, client, cfg.market_id, tp_idx, base_amount, price_decimals, tp_wire,
+            is_ask=slot.is_long, reduce_only=True, dry_run=cfg.dry_run,
+            label=label, slot=slot, slot_kind="tp",
+        )
+        if ok:
+            slot.tp_order_idx = tp_idx
+            slot.status       = SLOT_FILLED
+        else:
+            slot.status = SLOT_IDLE
+
+    # ── Detect TP fills ──────────────────────────────────────────────────────
+    all_slots = list(active_slots)
+    for slot in all_slots:
+        if slot.status != SLOT_FILLED:
+            continue
+        if slot.tp_order_idx in active_set:
+            continue
+        record_order_lifecycle(
+            monitor, slot.tp_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            "disappeared-from-active", slot.is_long, True, slot=slot, slot_kind="tp",
+        )
+        if not evidence_confirms_tp_fill(slot, evidence):
+            current_position = position_size_signed(evidence.position_after)
+            if current_position == 0.0:
+                LOGGER.warning(
+                    "[tp:no-evidence-but-zero-position] side=%s tp_price=%.4f coi=%s "
+                    "position=0 → resetting slot to IDLE (not counted as successful TP)",
+                    "LONG" if slot.is_long else "SHORT", slot.tp_price, slot.tp_order_idx,
+                )
+                record_order_lifecycle(
+                    monitor, slot.tp_order_idx,
+                    f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+                    "reset-idle-zero-position", slot.is_long, True, slot=slot, slot_kind="tp",
+                )
+                slot.status = SLOT_IDLE
+                continue
+            LOGGER.warning(
+                "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
+                "LONG" if slot.is_long else "SHORT", slot.tp_price, slot.tp_order_idx,
+            )
+            record_order_lifecycle(
+                monitor, slot.tp_order_idx,
+                f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+                "disappeared-without-fill-evidence", slot.is_long, True, slot=slot, slot_kind="tp",
+            )
+            continue
+
+        slot.status = SLOT_IDLE
+        state.success_count += 1
+        _today = _dt.date.today().isoformat()
+        if state.today_tp_date != _today:
+            state.today_tp_count = 0
+            state.today_tp_date  = _today
+        state.today_tp_count += 1
+
+        record_order_lifecycle(
+            monitor, slot.tp_order_idx,
+            f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            "fill-confirmed", slot.is_long, True, slot=slot, slot_kind="tp",
+        )
+        append_filled_order_trace_record(
+            market_id=cfg.market_id, order_kind="tp",
+            label=f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            client_order_index=slot.tp_order_idx,
+            linked_place_order_index=slot.place_order_idx,
+            price_wire=price_to_wire(slot.tp_price, price_decimals),
+            price_decimals=price_decimals, base_amount=base_amount,
+            is_ask=slot.is_long, reduce_only=True,
+            slot=slot, monitor=monitor,
+            place_time=monitor.order_submit_times.get(slot.tp_order_idx, ""),
+            fill_time=now_iso_ms(),
+        )
+        monitor.order_submit_times.pop(slot.tp_order_idx, None)
+        LOGGER.info(
+            "[trade:slot-closed] side=%s total_tp=%s today_tp=%s(%s) entry=%.4f tp=%.4f",
+            "LONG" if slot.is_long else "SHORT", state.success_count,
+            state.today_tp_count, state.today_tp_date, slot.place_price, slot.tp_price,
+        )
+
+    # ── Place new entry orders to fill grid ──────────────────────────────────
+    if side == SIDE_LONG:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned - cfg.price_step * i
+            if place_price <= 0 or place_price >= current_price:
+                continue
+            k    = GridState.price_key(place_price)
+            slot = state.long_slots.get(k)
+            if slot is None:
+                slot = GridSlot(place_price=place_price, tp_price=place_price + cfg.price_step, is_long=True)
+                state.long_slots[k] = slot
+            if slot.status != SLOT_IDLE:
+                continue
+            place_idx = state.alloc_idx()
+            ok = await do_place_order(
+                monitor, client, cfg.market_id, place_idx, base_amount, price_decimals,
+                price_to_wire(place_price, price_decimals),
+                is_ask=False, reduce_only=False, dry_run=cfg.dry_run,
+                label=f"LONG entry @{place_price:.4f}", slot=slot, slot_kind="entry",
+            )
+            if ok:
+                slot.place_order_idx = place_idx
+                slot.status          = SLOT_NEW
+    else:
+        for i in range(1, cfg.levels + 1):
+            place_price = aligned + cfg.price_step * i
+            if place_price <= current_price:
+                continue
+            k    = GridState.price_key(place_price)
+            slot = state.short_slots.get(k)
+            if slot is None:
+                slot = GridSlot(place_price=place_price, tp_price=place_price - cfg.price_step, is_long=False)
+                state.short_slots[k] = slot
+            if slot.status != SLOT_IDLE:
+                continue
+            place_idx = state.alloc_idx()
+            ok = await do_place_order(
+                monitor, client, cfg.market_id, place_idx, base_amount, price_decimals,
+                price_to_wire(place_price, price_decimals),
+                is_ask=True, reduce_only=False, dry_run=cfg.dry_run,
+                label=f"SHORT entry @{place_price:.4f}", slot=slot, slot_kind="entry",
+            )
+            if ok:
+                slot.place_order_idx = place_idx
+                slot.status          = SLOT_NEW
