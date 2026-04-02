@@ -1,9 +1,11 @@
 
 import asyncio
+import csv
 import json
 import logging
 import sys
 import time
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -28,6 +30,28 @@ SIDE_LONG = "long"
 SIDE_SHORT = "short"
 LOGGER = logging.getLogger("smart_grid")
 RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+ORDER_TRACE_FILE: Optional[Path] = None
+ORDER_TRACE_HEADERS = [
+    "place_time",
+    "fill_time",
+    "market_id",
+    "order_kind",
+    "label",
+    "client_order_index",
+    "linked_place_order_index",
+    "price",
+    "price_wire",
+    "base_amount",
+    "is_ask",
+    "reduce_only",
+    "slot_side",
+    "entry_price",
+    "tp_price",
+    "position_signed",
+    "position_abs",
+    "open_order_count",
+    "pending_order_count",
+]
 
 def is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
@@ -72,6 +96,69 @@ def setup_logging(market_id: int, side: str) -> Path:
     LOGGER.info("[logger] initialized path=%s", log_path)
     return log_path
 
+def setup_order_trace_file(market_id: int, side: str) -> Path:
+    trace_dir = Path.cwd() / "logs"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = trace_dir / f"smart_grid_market{market_id}_{side}_orders.csv"
+    if not trace_path.exists() or trace_path.stat().st_size == 0:
+        with trace_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=ORDER_TRACE_HEADERS)
+            writer.writeheader()
+    return trace_path
+
+def now_iso_ms() -> str:
+    return datetime.now().isoformat(timespec="milliseconds")
+
+def append_filled_order_trace_record(
+    market_id: int,
+    order_kind: str,
+    label: str,
+    client_order_index: int,
+    linked_place_order_index: int,
+    price_wire: int,
+    price_decimals: int,
+    base_amount: int,
+    is_ask: bool,
+    reduce_only: bool,
+    slot: Optional["GridSlot"],
+    monitor: "RuntimeMonitor",
+    place_time: str,
+    fill_time: str,
+) -> None:
+    if ORDER_TRACE_FILE is None:
+        return
+    snapshot = monitor.last_position
+    record = {
+        "place_time": place_time,
+        "fill_time": fill_time,
+        "market_id": market_id,
+        "order_kind": order_kind,
+        "label": label,
+        "client_order_index": client_order_index,
+        "linked_place_order_index": linked_place_order_index,
+        "price": wire_price_to_float(str(price_wire), price_decimals),
+        "price_wire": price_wire,
+        "base_amount": base_amount,
+        "is_ask": is_ask,
+        "reduce_only": reduce_only,
+        "slot_side": (
+            "LONG" if slot is not None and slot.is_long else
+            ("SHORT" if slot is not None else "")
+        ),
+        "entry_price": slot.place_price if slot is not None else 0.0,
+        "tp_price": slot.tp_price if slot is not None else 0.0,
+        "position_signed": position_size_signed(snapshot),
+        "position_abs": snapshot.position if snapshot is not None else 0.0,
+        "open_order_count": snapshot.open_order_count if snapshot is not None else 0,
+        "pending_order_count": snapshot.pending_order_count if snapshot is not None else 0,
+    }
+    try:
+        with ORDER_TRACE_FILE.open("a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=ORDER_TRACE_HEADERS)
+            writer.writerow(record)
+    except Exception as trace_exc:
+        LOGGER.warning("[trace:file] write failed path=%s reason=%s", ORDER_TRACE_FILE, trace_exc)
+
 @dataclass
 class GridSlot:
     place_price:      float
@@ -106,6 +193,7 @@ class RuntimeMonitor:
     seen_trade_ids: Set[int] = field(default_factory=set)
     recent_trade_client_ids: Set[int] = field(default_factory=set)
     order_lifecycles: Dict[int, "OrderLifecycle"] = field(default_factory=dict)
+    order_submit_times: Dict[int, str] = field(default_factory=dict)
 
 @dataclass
 class OrderLifecycle:
@@ -239,6 +327,28 @@ def position_size_signed(snapshot: Optional[PositionSnapshot]) -> float:
         return 0.0
     return snapshot.position * snapshot.sign
 
+def split_position_amounts(total_amount: int, chunk_amount: int, min_base_amount: int) -> List[int]:
+    if total_amount <= 0 or chunk_amount <= 0:
+        return []
+
+    chunks: List[int] = []
+    remaining = total_amount
+    while remaining > 0:
+        next_chunk = min(chunk_amount, remaining)
+        remainder = remaining - next_chunk
+        if 0 < remainder < min_base_amount:
+            next_chunk += remainder
+            remainder = 0
+        if next_chunk < min_base_amount:
+            if chunks:
+                chunks[-1] += next_chunk
+            else:
+                chunks.append(next_chunk)
+            break
+        chunks.append(next_chunk)
+        remaining = remainder
+    return chunks
+
 def record_order_lifecycle(
     monitor: RuntimeMonitor,
     client_order_index: int,
@@ -319,6 +429,20 @@ def evidence_confirms_tp_fill(slot: GridSlot, evidence: TradeEvidence) -> bool:
     after = position_size_signed(evidence.position_after)
     delta = after - before
     return delta < 0 if slot.is_long else delta > 0
+
+def should_cancel_far_order(slot: GridSlot, side: str, aligned: float, far_threshold: float) -> Tuple[bool, str, int, float]:
+    if side == SIDE_LONG:
+        if slot.status == SLOT_NEW and slot.place_price < aligned - far_threshold:
+            return True, "entry", slot.place_order_idx, slot.place_price
+        if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_price > aligned + far_threshold:
+            return True, "tp", slot.tp_order_idx, slot.tp_price
+        return False, "", 0, 0.0
+
+    if slot.status == SLOT_NEW and slot.place_price > aligned + far_threshold:
+        return True, "entry", slot.place_order_idx, slot.place_price
+    if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_price < aligned - far_threshold:
+        return True, "tp", slot.tp_order_idx, slot.tp_price
+    return False, "", 0, 0.0
 
 def price_to_wire(price: float, price_decimals: int) -> int:
     return int(round(price * (10 ** price_decimals)))
@@ -568,6 +692,109 @@ async def collect_trade_evidence(
     monitor.last_position = snapshot
     return evidence
 
+async def seed_startup_position_take_profits(
+    monitor: RuntimeMonitor,
+    client: lighter.SignerClient,
+    state: GridState,
+    cfg: GridConfig,
+    current_price: float,
+    price_decimals: int,
+    size_decimals: int,
+    base_amount: int,
+    min_base_amount: float,
+) -> int:
+    snapshot = monitor.last_position
+    signed_position = position_size_signed(snapshot)
+    if snapshot is None or signed_position == 0:
+        LOGGER.info("[startup:position-seed] no existing position to seed")
+        return 0
+
+    if cfg.side == SIDE_LONG and signed_position <= 0:
+        LOGGER.info("[startup:position-seed] existing position is not long, skip side=%s position=%s", cfg.side, signed_position)
+        return 0
+    if cfg.side == SIDE_SHORT and signed_position >= 0:
+        LOGGER.info("[startup:position-seed] existing position is not short, skip side=%s position=%s", cfg.side, signed_position)
+        return 0
+
+    total_position_wire = size_to_wire(abs(signed_position), size_decimals)
+    min_base_wire = max(1, size_to_wire(min_base_amount, size_decimals))
+    tp_amounts = split_position_amounts(total_position_wire, base_amount, min_base_wire)
+    if not tp_amounts:
+        LOGGER.info(
+            "[startup:position-seed] position exists but no valid tp chunks side=%s position=%s total_wire=%s",
+            cfg.side,
+            signed_position,
+            total_position_wire,
+        )
+        return 0
+
+    aligned = (int(current_price / cfg.price_step)) * cfg.price_step
+    seeded_count = 0
+    LOGGER.info(
+        "[startup:position-seed] side=%s signed_position=%s total_wire=%s tp_chunks=%s aligned=%.4f avg_entry=%.4f",
+        cfg.side,
+        signed_position,
+        total_position_wire,
+        tp_amounts,
+        aligned,
+        snapshot.avg_entry_price if snapshot is not None else 0.0,
+    )
+
+    for idx, tp_amount in enumerate(tp_amounts, start=1):
+        is_long = cfg.side == SIDE_LONG
+        tp_price = aligned + cfg.price_step * idx if is_long else aligned - cfg.price_step * idx
+        place_price = tp_price - cfg.price_step if is_long else tp_price + cfg.price_step
+        synthetic_place_idx = state.alloc_idx()
+        tp_idx = state.alloc_idx()
+        slot = GridSlot(
+            place_price=place_price,
+            tp_price=tp_price,
+            is_long=is_long,
+            status=SLOT_FILLED,
+            place_order_idx=synthetic_place_idx,
+        )
+        record_order_lifecycle(
+            monitor,
+            synthetic_place_idx,
+            f"{'LONG' if is_long else 'SHORT'} startup entry @{place_price:.4f}",
+            "startup-position-seeded",
+            not is_long,
+            False,
+            slot=slot,
+            slot_kind="entry",
+        )
+        ok = await do_place_order(
+            monitor=monitor,
+            client=client,
+            market_id=cfg.market_id,
+            order_idx=tp_idx,
+            base_amount=tp_amount,
+            price_decimals=price_decimals,
+            wire_price=price_to_wire(tp_price, price_decimals),
+            is_ask=is_long,
+            reduce_only=True,
+            dry_run=cfg.dry_run,
+            label=f"{'LONG' if is_long else 'SHORT'} startup TP @{tp_price:.4f}",
+            slot=slot,
+            slot_kind="tp",
+        )
+        if not ok:
+            LOGGER.warning(
+                "[startup:position-seed] failed to place tp side=%s tp_price=%.4f amount=%s linked_place=%s",
+                cfg.side,
+                tp_price,
+                tp_amount,
+                synthetic_place_idx,
+            )
+            continue
+        slot.tp_order_idx = tp_idx
+        slot_map = state.long_slots if is_long else state.short_slots
+        slot_map[GridState.price_key(place_price)] = slot
+        seeded_count += 1
+
+    LOGGER.info("[startup:position-seed] seeded_tp_orders=%s side=%s", seeded_count, cfg.side)
+    return seeded_count
+
 class AuthTokenManager:
     REFRESH_BEFORE_SEC = 120
 
@@ -593,6 +820,7 @@ async def do_place_order(
     market_id:   int,
     order_idx:   int,
     base_amount: int,
+    price_decimals: int,
     wire_price:  int,
     is_ask:      bool,
     reduce_only: bool,
@@ -601,6 +829,7 @@ async def do_place_order(
     slot:        Optional[GridSlot] = None,
     slot_kind:   str = "",
 ) -> bool:
+    submit_time = now_iso_ms()
     LOGGER.info(
         "[order:req] label=%s coi=%s market=%s base_amount=%s price_wire=%s is_ask=%s reduce_only=%s",
         label, order_idx, market_id, base_amount, wire_price, is_ask, reduce_only,
@@ -627,6 +856,7 @@ async def do_place_order(
         return False
     LOGGER.info("[order:resp] label=%s coi=%s tx_hash=%s err=None", label, order_idx, tx_hash)
     record_order_lifecycle(monitor, order_idx, label, "accepted", is_ask, reduce_only, slot=slot, slot_kind=slot_kind, tx_hash=str(tx_hash or ""))
+    monitor.order_submit_times[order_idx] = submit_time
     return True
 
 async def do_cancel_order(
@@ -640,6 +870,7 @@ async def do_cancel_order(
     if dry_run:
         LOGGER.info("[cancel:dry-run] label=%s coi=%s", label, order_idx)
         record_order_lifecycle(monitor, order_idx, label, "cancel-dry-run", False, False)
+        monitor.order_submit_times.pop(order_idx, None)
         return
     LOGGER.info("[cancel:req] label=%s coi=%s market=%s", label, order_idx, market_id)
     existing = monitor.order_lifecycles.get(order_idx)
@@ -666,6 +897,8 @@ async def do_cancel_order(
         tx_hash=str(tx_hash or ""),
         error="" if err is None else str(err),
     )
+    if err is None:
+        monitor.order_submit_times.pop(order_idx, None)
 
 async def cancel_all_active_orders_for_market(
     order_api: lighter.OrderApi,
@@ -770,22 +1003,33 @@ async def run_one_cycle(
 
     active_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     for slot in list(active_slots):
-        should_cancel = (
-            side == SIDE_LONG
-            and slot.status == SLOT_NEW
-            and slot.place_price < aligned - far_threshold
-            and slot.place_order_idx in active_set
-        ) or (
-            side == SIDE_SHORT
-            and slot.status == SLOT_NEW
-            and slot.place_price > aligned + far_threshold
-            and slot.place_order_idx in active_set
+        should_cancel, order_kind, cancel_order_idx, cancel_price = should_cancel_far_order(
+            slot, side, aligned, far_threshold
         )
-        if should_cancel:
+        if not should_cancel:
+            continue
+        if order_kind == "entry" and cancel_order_idx in active_set:
             await do_cancel_order(
-                monitor, client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
-                f"{'LONG' if slot.is_long else 'SHORT'} entry(far) @{slot.place_price:.4f}")
+                monitor,
+                client,
+                cfg.market_id,
+                cancel_order_idx,
+                cfg.dry_run,
+                f"{'LONG' if slot.is_long else 'SHORT'} entry(far) @{cancel_price:.4f}",
+            )
             slot.status = SLOT_IDLE
+            slot.place_order_idx = 0
+            continue
+        if order_kind == "tp" and cancel_order_idx in active_set:
+            await do_cancel_order(
+                monitor,
+                client,
+                cfg.market_id,
+                cancel_order_idx,
+                cfg.dry_run,
+                f"{'LONG' if slot.is_long else 'SHORT'} TP(far) @{cancel_price:.4f}",
+            )
+            slot.tp_order_idx = 0
 
     all_slots = list(active_slots)
     for slot in all_slots:
@@ -838,12 +1082,29 @@ async def run_one_cycle(
             slot=slot,
             slot_kind="entry",
         )
+        append_filled_order_trace_record(
+            market_id=cfg.market_id,
+            order_kind="entry",
+            label=f"{'LONG' if slot.is_long else 'SHORT'} entry @{slot.place_price:.4f}",
+            client_order_index=slot.place_order_idx,
+            linked_place_order_index=0,
+            price_wire=price_to_wire(slot.place_price, price_decimals),
+            price_decimals=price_decimals,
+            base_amount=base_amount,
+            is_ask=not slot.is_long,
+            reduce_only=False,
+            slot=slot,
+            monitor=monitor,
+            place_time=monitor.order_submit_times.get(slot.place_order_idx, ""),
+            fill_time=now_iso_ms(),
+        )
+        monitor.order_submit_times.pop(slot.place_order_idx, None)
 
         tp_idx  = state.alloc_idx()
         tp_wire = price_to_wire(slot.tp_price, price_decimals)
         label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
         ok = await do_place_order(
-            monitor, client, cfg.market_id, tp_idx, base_amount, tp_wire,
+            monitor, client, cfg.market_id, tp_idx, base_amount, price_decimals, tp_wire,
             is_ask=slot.is_long,
             reduce_only=True,
             dry_run=cfg.dry_run,
@@ -934,6 +1195,23 @@ async def run_one_cycle(
             slot=slot,
             slot_kind="tp",
         )
+        append_filled_order_trace_record(
+            market_id=cfg.market_id,
+            order_kind="tp",
+            label=f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
+            client_order_index=slot.tp_order_idx,
+            linked_place_order_index=slot.place_order_idx,
+            price_wire=price_to_wire(slot.tp_price, price_decimals),
+            price_decimals=price_decimals,
+            base_amount=base_amount,
+            is_ask=slot.is_long,
+            reduce_only=True,
+            slot=slot,
+            monitor=monitor,
+            place_time=monitor.order_submit_times.get(slot.tp_order_idx, ""),
+            fill_time=now_iso_ms(),
+        )
+        monitor.order_submit_times.pop(slot.tp_order_idx, None)
         LOGGER.info(
             "[trade:slot-closed] side=%s total_tp=%s today_tp=%s(%s) entry=%.4f tp=%.4f",
             "LONG" if slot.is_long else "SHORT",
@@ -963,6 +1241,7 @@ async def run_one_cycle(
             place_idx = state.alloc_idx()
             ok = await do_place_order(
                 monitor, client, cfg.market_id, place_idx, base_amount,
+                price_decimals,
                 price_to_wire(place_price, price_decimals),
                 is_ask=False, reduce_only=False,
                 dry_run=cfg.dry_run,
@@ -992,6 +1271,7 @@ async def run_one_cycle(
             place_idx = state.alloc_idx()
             ok = await do_place_order(
                 monitor, client, cfg.market_id, place_idx, base_amount,
+                price_decimals,
                 price_to_wire(place_price, price_decimals),
                 is_ask=True, reduce_only=False,
                 dry_run=cfg.dry_run,
@@ -1004,6 +1284,7 @@ async def run_one_cycle(
                 slot.status          = SLOT_NEW
 
 async def run_strategy() -> None:
+    global ORDER_TRACE_FILE
     base_url, account_index, private_keys, resolved_cfg_path = load_api_key_config()
     cfg = load_grid_config(resolved_cfg_path)
     if cfg.levels <= 0:
@@ -1012,6 +1293,7 @@ async def run_strategy() -> None:
         raise ValueError("price-step must be > 0")
     cfg.side = normalize_side(cfg.side)
     log_path = setup_logging(cfg.market_id, cfg.side)
+    ORDER_TRACE_FILE = setup_order_trace_file(cfg.market_id, cfg.side)
     LOGGER.info("[config] using: %s", resolved_cfg_path)
 
     LOGGER.info(
@@ -1020,6 +1302,7 @@ async def run_strategy() -> None:
         cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run,
     )
     LOGGER.info("[logger] active log file: %s", log_path)
+    LOGGER.info("[trace:file] active order trace file: %s", ORDER_TRACE_FILE)
 
     configuration = lighter.Configuration(host=base_url)
     configuration.api_key = {"default": private_keys[min(private_keys.keys())]}
@@ -1156,6 +1439,19 @@ async def run_strategy() -> None:
             account_index=account_index,
             market_id=cfg.market_id,
         )
+
+        seeded_tp_orders = await seed_startup_position_take_profits(
+            monitor=monitor,
+            client=client,
+            state=state,
+            cfg=cfg,
+            current_price=current_price,
+            price_decimals=price_decimals,
+            size_decimals=size_decimals,
+            base_amount=base_amount,
+            min_base_amount=min_base_amount,
+        )
+        LOGGER.info("[startup:position-seed] completed seeded_tp_orders=%s", seeded_tp_orders)
 
         aligned = (int(current_price / cfg.price_step)) * cfg.price_step
         LOGGER.info(
