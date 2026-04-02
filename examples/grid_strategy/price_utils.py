@@ -25,7 +25,7 @@ def build_entry_prices_for_side(current_price: float, cfg: GridConfig) -> List[f
     aligned = (int(current_price / cfg.price_step)) * cfg.price_step
     prices: List[float] = []
     if cfg.side == SIDE_LONG:
-        for i in range(1, cfg.levels + 1):
+        for i in range(cfg.levels):
             place_price = aligned - cfg.price_step * i
             if place_price <= 0 or place_price >= current_price:
                 continue

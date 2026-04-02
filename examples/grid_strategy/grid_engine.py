@@ -142,7 +142,7 @@ async def seed_startup_position_take_profits(
 
     # Keep startup-seeded TP away from the nearest grid TP level to avoid
     # colliding with TP orders that will be created by fresh place fills.
-    startup_tp_offset_steps = 2
+    startup_tp_offset_steps = 3
 
     for idx, tp_amount in enumerate(tp_amounts, start=1):
         if seeded_count >= cfg.levels:
@@ -452,7 +452,7 @@ async def run_one_cycle(
 
     # ── Place new entry orders to fill grid ──────────────────────────────────
     if side == SIDE_LONG:
-        for i in range(1, cfg.levels + 1):
+        for i in range(cfg.levels):
             place_price = aligned - cfg.price_step * i
             if place_price <= 0 or place_price >= current_price:
                 continue
