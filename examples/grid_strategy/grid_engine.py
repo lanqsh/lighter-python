@@ -1,7 +1,7 @@
 import asyncio
 import datetime as _dt
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import lighter
 
@@ -57,6 +57,96 @@ def should_refill_tp_for_slot(slot: GridSlot, current_price: float, cfg: GridCon
 def count_side_tp_orders(state: GridState, side: str) -> int:
     slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     return sum(1 for slot in slots if slot.status == SLOT_FILLED and slot.tp_order_idx > 0)
+
+
+async def ensure_tp_capacity_for_new_order(
+    monitor: RuntimeMonitor,
+    client: lighter.SignerClient,
+    state: GridState,
+    cfg: GridConfig,
+    side: str,
+    active_set: Dict[int, Any],
+    current_price: float,
+    desired_tp_price: float,
+    reason: str,
+) -> bool:
+    current_tp_count = count_side_tp_orders(state, side)
+    if current_tp_count < cfg.levels:
+        return True
+
+    slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    farthest_slot: Optional[GridSlot] = None
+    farthest_distance = -1.0
+    for slot in slots:
+        if slot.status != SLOT_FILLED or slot.tp_order_idx <= 0:
+            continue
+        if slot.tp_order_idx not in active_set:
+            continue
+        distance = abs(slot.tp_price - current_price)
+        if distance > farthest_distance:
+            farthest_slot = slot
+            farthest_distance = distance
+
+    if farthest_slot is None:
+        LOGGER.warning(
+            "[tp:replace-cap-failed] side=%s reason=no-active-tp levels=%s desired_tp=%.4f why=%s",
+            side,
+            cfg.levels,
+            desired_tp_price,
+            reason,
+        )
+        return False
+
+    desired_distance = abs(desired_tp_price - current_price)
+    if farthest_distance <= desired_distance:
+        LOGGER.info(
+            "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
+            side,
+            cfg.levels,
+            current_tp_count,
+            desired_tp_price,
+            desired_distance,
+            farthest_slot.tp_price,
+            farthest_distance,
+            reason,
+        )
+        return False
+
+    replaced_idx = farthest_slot.tp_order_idx
+    await do_cancel_order(
+        monitor,
+        client,
+        cfg.market_id,
+        replaced_idx,
+        cfg.dry_run,
+        f"{'LONG' if farthest_slot.is_long else 'SHORT'} TP(replace-far) @{farthest_slot.tp_price:.4f}",
+    )
+    cancel_lifecycle = monitor.order_lifecycles.get(replaced_idx)
+    cancel_ok = cfg.dry_run or (cancel_lifecycle is not None and cancel_lifecycle.event == "cancel-confirmed")
+    if not cancel_ok:
+        LOGGER.warning(
+            "[tp:replace-cap-failed] side=%s reason=cancel-not-confirmed replace_coi=%s replace_tp=%.4f desired_tp=%.4f why=%s",
+            side,
+            replaced_idx,
+            farthest_slot.tp_price,
+            desired_tp_price,
+            reason,
+        )
+        return False
+
+    farthest_slot.tp_order_idx = 0
+    farthest_slot.tp_base_amount = 0
+    active_set.pop(replaced_idx, None)
+    LOGGER.info(
+        "[tp:replace-cap] side=%s levels=%s old_tp=%.4f old_coi=%s new_tp=%.4f why=%s",
+        side,
+        cfg.levels,
+        farthest_slot.tp_price,
+        replaced_idx,
+        desired_tp_price,
+        reason,
+    )
+    return True
 
 
 def summarize_active_slots(
@@ -284,6 +374,8 @@ async def run_one_cycle(
     for slot in all_slots:
         if slot.status != SLOT_NEW:
             continue
+        if slot.place_order_idx <= 0:
+            continue
         if slot.place_order_idx in active_set:
             continue
         LOGGER.info(
@@ -329,16 +421,17 @@ async def run_one_cycle(
         tp_idx  = state.alloc_idx()
         tp_wire = price_to_wire(slot.tp_price, price_decimals)
         label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
-        current_tp_count = count_side_tp_orders(state, side)
-        if current_tp_count >= cfg.levels:
-            LOGGER.info(
-                "[tp:skip-cap] side=%s levels=%s current_tp=%s entry=%.4f tp=%.4f",
-                side,
-                cfg.levels,
-                current_tp_count,
-                slot.place_price,
-                slot.tp_price,
-            )
+        if not await ensure_tp_capacity_for_new_order(
+            monitor=monitor,
+            client=client,
+            state=state,
+            cfg=cfg,
+            side=side,
+            active_set=active_set,
+            current_price=current_price,
+            desired_tp_price=slot.tp_price,
+            reason=f"entry-fill@{slot.place_price:.4f}",
+        ):
             slot.tp_order_idx = 0
             slot.status = SLOT_FILLED
             continue
@@ -358,6 +451,8 @@ async def run_one_cycle(
     all_slots = list(active_slots)
     for slot in all_slots:
         if slot.status != SLOT_FILLED:
+            continue
+        if slot.tp_order_idx <= 0:
             continue
         if slot.tp_order_idx in active_set:
             continue
@@ -427,9 +522,19 @@ async def run_one_cycle(
     # ── Refill missing TP only when TP level is far enough from current price ─
     all_slots = list(active_slots)
     for slot in all_slots:
-        if count_side_tp_orders(state, side) >= cfg.levels:
-            break
         if not should_refill_tp_for_slot(slot, current_price, cfg):
+            continue
+        if not await ensure_tp_capacity_for_new_order(
+            monitor=monitor,
+            client=client,
+            state=state,
+            cfg=cfg,
+            side=side,
+            active_set=active_set,
+            current_price=current_price,
+            desired_tp_price=slot.tp_price,
+            reason=f"tp-refill@{slot.tp_price:.4f}",
+        ):
             continue
         tp_idx = state.alloc_idx()
         label = f"{'LONG' if slot.is_long else 'SHORT'} TP(refill) @{slot.tp_price:.4f}"
