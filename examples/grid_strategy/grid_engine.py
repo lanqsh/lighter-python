@@ -142,7 +142,7 @@ async def seed_startup_position_take_profits(
 
     # Keep startup-seeded TP away from the nearest grid TP level to avoid
     # colliding with TP orders that will be created by fresh place fills.
-    startup_tp_offset_steps = 3
+    startup_tp_offset_steps = 2
 
     for idx, tp_amount in enumerate(tp_amounts, start=1):
         if seeded_count >= cfg.levels:
