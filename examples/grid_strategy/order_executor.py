@@ -217,17 +217,17 @@ async def do_market_add_position(
         record_order_lifecycle(monitor, order_idx, label, "dry-run", is_ask, False)
         return True
 
-    # Use price=0 for market order (will be filled at current market price)
-    _, tx_hash, err = await client.create_order(
+    # Market orders still require a valid price threshold in this SDK/exchange path.
+    # Use current best price as avg_execution_price to satisfy validation.
+    best_price = await client.get_best_price(market_id, is_ask)
+    avg_execution_price = max(1, int(best_price))
+    _, tx_hash, err = await client.create_market_order(
         market_index=market_id,
         client_order_index=order_idx,
         base_amount=base_amount,
-        price=0,  # 0 indicates market order
+        avg_execution_price=avg_execution_price,
         is_ask=is_ask,
-        order_type=client.ORDER_TYPE_MARKET,
-        time_in_force=client.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
         reduce_only=False,
-        trigger_price=0,
     )
     if err is not None:
         LOGGER.warning("[market-order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
