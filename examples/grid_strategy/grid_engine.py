@@ -336,9 +336,10 @@ async def check_and_add_position(
     size_decimals: int,
 ) -> bool:
     """
-    Check if current position is below target. If so, add position via market order.
+    Check if current position is below threshold. If so, add N-grid total amount via market order.
 
-    Target position = levels * base_amount
+    Trigger threshold = (levels + 1) * base_amount
+    Per top-up amount = levels * base_amount
     Transaction direction:
     - For LONG: use is_ask=False (BUY)
     - For SHORT: use is_ask=True (SELL)
@@ -350,7 +351,7 @@ async def check_and_add_position(
 
     base_amount_float = base_amount / (10 ** size_decimals)
     grid_total_amount = cfg.levels * base_amount_float
-    trigger_threshold_amount = grid_total_amount + 1.0
+    trigger_threshold_amount = grid_total_amount + base_amount_float
     current_position = position_size_signed(evidence.position_after)
 
     # For LONG side: we want current_position to be >= target position (positive)
@@ -377,12 +378,12 @@ async def check_and_add_position(
     if add_amount <= 0:
         return False
 
-    # Check 60-second interval
+    # Check 5-minute interval
     now = time.time()
-    if now - monitor.last_add_position_time < 60:
+    if now - monitor.last_add_position_time < 300:
         time_since_last = now - monitor.last_add_position_time
         LOGGER.info(
-            "[add-position] throttled by interval check side=%s last_add=%.1fs ago (need >60s)",
+            "[add-position] throttled by interval check side=%s last_add=%.1fs ago (need >300s)",
             side, time_since_last,
         )
         return False
