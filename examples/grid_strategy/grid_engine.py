@@ -349,27 +349,28 @@ async def check_and_add_position(
     import time
 
     base_amount_float = base_amount / (10 ** size_decimals)
-    target_position_amount = cfg.levels * base_amount_float
+    grid_total_amount = cfg.levels * base_amount_float
+    trigger_threshold_amount = grid_total_amount + 1.0
     current_position = position_size_signed(evidence.position_after)
 
     # For LONG side: we want current_position to be >= target position (positive)
     # For SHORT side: we want current_position to be <= -target position (negative)
     if side == SIDE_LONG:
-        if current_position >= target_position_amount:
+        if current_position >= trigger_threshold_amount:
             LOGGER.info(
-                "[add-position] skip LONG current=%.6f target=%.6f (levels=%s base_amount=%s)",
-                current_position, target_position_amount, cfg.levels, base_amount,
+                "[add-position] skip LONG current=%.6f threshold=%.6f (levels=%s base_amount=%s)",
+                current_position, trigger_threshold_amount, cfg.levels, base_amount,
             )
             return False
-        add_amount_float = target_position_amount - current_position
+        add_amount_float = grid_total_amount
     else:  # SIDE_SHORT
-        if current_position <= -target_position_amount:
+        if current_position <= -trigger_threshold_amount:
             LOGGER.info(
-                "[add-position] skip SHORT current=%.6f target=-%.6f (levels=%s base_amount=%s)",
-                current_position, target_position_amount, cfg.levels, base_amount,
+                "[add-position] skip SHORT current=%.6f threshold=-%.6f (levels=%s base_amount=%s)",
+                current_position, trigger_threshold_amount, cfg.levels, base_amount,
             )
             return False
-        add_amount_float = -target_position_amount - current_position
+        add_amount_float = grid_total_amount
 
     # Ensure add_amount is positive and at least one wire unit
     add_amount = size_to_wire(abs(add_amount_float), size_decimals)
@@ -388,11 +389,11 @@ async def check_and_add_position(
 
     order_idx = state.alloc_idx()
     is_ask = side == SIDE_SHORT  # For LONG, is_ask=False; for SHORT, is_ask=True
-    label = f"{side.upper()} market-add-position target={target_position_amount:.6f} add={add_amount_float:.6f}"
+    label = f"{side.upper()} market-add-position threshold={trigger_threshold_amount:.6f} add={add_amount_float:.6f}"
 
     LOGGER.info(
-        "[add-position:execute] side=%s current=%.6f target=%.6f add_amount=%.6f(%s wire) coi=%s",
-        side, current_position, target_position_amount, abs(add_amount_float), add_amount, order_idx,
+        "[add-position:execute] side=%s current=%.6f threshold=%.6f add_amount=%.6f(%s wire) coi=%s",
+        side, current_position, trigger_threshold_amount, abs(add_amount_float), add_amount, order_idx,
     )
 
     ok = await do_market_add_position(
@@ -404,15 +405,15 @@ async def check_and_add_position(
     if ok:
         monitor.last_add_position_time = now
         LOGGER.info(
-            "[add-position:success] side=%s target=%.6f added=%.6f(%s wire) coi=%s",
-            side, target_position_amount, abs(add_amount_float), add_amount, order_idx,
+            "[add-position:success] side=%s threshold=%.6f added=%.6f(%s wire) coi=%s",
+            side, trigger_threshold_amount, abs(add_amount_float), add_amount, order_idx,
         )
         # Send bark message
         message = (
             f"[lighter] Market Add Position\n"
             f"side={side.upper()}\n"
             f"current_position={current_position:.4f}\n"
-            f"target_position={target_position_amount:.4f}\n"
+            f"threshold_position={trigger_threshold_amount:.4f}\n"
             f"added_amount={abs(add_amount_float):.4f}\n"
             f"symbol={cfg.market_symbol}\n"
             f"leverage={cfg.leverage}x"
@@ -422,8 +423,8 @@ async def check_and_add_position(
         return True
     else:
         LOGGER.warning(
-            "[add-position:failed] side=%s target=%.6f failed_add=%s coi=%s",
-            side, target_position_amount, add_amount, order_idx,
+            "[add-position:failed] side=%s threshold=%.6f failed_add=%s coi=%s",
+            side, trigger_threshold_amount, add_amount, order_idx,
         )
         return False
 
