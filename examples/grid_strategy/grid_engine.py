@@ -35,9 +35,16 @@ def get_order_base_amount(order: Any) -> int:
     return 0
 
 
-def should_refill_tp_for_slot(slot: GridSlot, current_price: float, cfg: GridConfig) -> bool:
+def should_refill_tp_for_slot(
+    slot: GridSlot,
+    current_price: float,
+    cfg: GridConfig,
+    allow_any_distance: bool = False,
+) -> bool:
     if slot.status != SLOT_FILLED or slot.tp_order_idx != 0:
         return False
+    if allow_any_distance:
+        return True
     min_distance = max(0, cfg.tp_refill_min_steps) * cfg.price_step
     far_cancel_distance = cfg.price_step * cfg.levels * 2
     auto_max_distance = max(0.0, far_cancel_distance - cfg.price_step)
@@ -274,6 +281,10 @@ async def seed_startup_position_take_profits(
                 "[startup:position-seed] failed to place tp side=%s tp_price=%.4f amount=%s linked_place=%s",
                 cfg.side, tp_price, tp_amount, synthetic_place_idx,
             )
+            slot.tp_order_idx = 0
+            slot.tp_base_amount = 0
+            slot_map = state.long_slots if is_long else state.short_slots
+            slot_map[GridState.price_key(place_price)] = slot
             continue
         slot.tp_order_idx = tp_idx
         slot.tp_base_amount = tp_amount
@@ -328,7 +339,7 @@ async def run_one_cycle(
     active_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     for slot in list(active_slots):
         should_cancel, order_kind, cancel_order_idx, cancel_price = should_cancel_far_order(
-            slot, side, aligned, far_threshold
+            slot, side, aligned, far_threshold, cfg.price_step, cfg.levels
         )
         if not should_cancel:
             continue
@@ -445,7 +456,16 @@ async def run_one_cycle(
             slot.tp_base_amount = base_amount
             slot.status       = SLOT_FILLED
         else:
-            slot.status = SLOT_IDLE
+            LOGGER.warning(
+                "[tp:place-failed] side=%s entry=%.4f tp=%.4f coi=%s",
+                "LONG" if slot.is_long else "SHORT",
+                slot.place_price,
+                slot.tp_price,
+                tp_idx,
+            )
+            slot.tp_order_idx = 0
+            slot.tp_base_amount = 0
+            slot.status = SLOT_FILLED
 
     # ── Detect TP fills ──────────────────────────────────────────────────────
     all_slots = list(active_slots)
@@ -521,9 +541,30 @@ async def run_one_cycle(
 
     # ── Refill missing TP only when TP level is far enough from current price ─
     all_slots = list(active_slots)
-    for slot in all_slots:
-        if not should_refill_tp_for_slot(slot, current_price, cfg):
+    refill_candidates = sorted(
+        all_slots,
+        key=lambda slot: abs(slot.tp_price - current_price),
+    )
+    for slot in refill_candidates:
+        active_tp_count = count_side_tp_orders(state, side)
+        signed_position = position_size_signed(evidence.position_after)
+        has_side_position = signed_position > 0 if side == SIDE_LONG else signed_position < 0
+        allow_zero_tp_recovery = active_tp_count == 0 and has_side_position
+        if not should_refill_tp_for_slot(
+            slot,
+            current_price,
+            cfg,
+            allow_any_distance=allow_zero_tp_recovery,
+        ):
             continue
+        if allow_zero_tp_recovery:
+            LOGGER.info(
+                "[tp:recover-zero] side=%s position=%s tp_price=%.4f entry=%.4f",
+                side,
+                signed_position,
+                slot.tp_price,
+                slot.place_price,
+            )
         if not await ensure_tp_capacity_for_new_order(
             monitor=monitor,
             client=client,

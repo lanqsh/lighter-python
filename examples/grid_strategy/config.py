@@ -66,7 +66,7 @@ def load_grid_config(resolved_config_file: str) -> GridConfig:
     return cfg
 
 
-def load_api_key_config() -> Tuple[str, int, Dict[int, str], str]:
+def load_api_key_config() -> Tuple[str, int, Dict[int, str], str, str]:
     candidates = [
         Path.cwd() / "api_key_config.json",
         GRID_STRATEGY_DIR / "api_key_config.json",
@@ -78,4 +78,5 @@ def load_api_key_config() -> Tuple[str, int, Dict[int, str], str]:
     with p.open("r", encoding="utf-8") as f:
         cfg = json.load(f)
     private_keys = {int(k): v for k, v in cfg["privateKeys"].items()}
-    return cfg["baseUrl"], int(cfg["accountIndex"]), private_keys, str(p)
+    bark_server = str(cfg.get("barkServer", "") or "").strip()
+    return cfg["baseUrl"], int(cfg["accountIndex"]), private_keys, str(p), bark_server

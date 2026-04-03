@@ -6,7 +6,7 @@ import lighter
 from lighter.exceptions import ApiException
 
 from examples.grid_strategy.models import (
-    PositionSnapshot, RuntimeMonitor, TradeEvidence,
+    AccountSnapshot, PositionSnapshot, RuntimeMonitor, TradeEvidence,
     format_position_snapshot, position_size_signed,
     RETRYABLE_HTTP_STATUS,
 )
@@ -87,14 +87,30 @@ async def fetch_position_snapshot(
             avg_entry_price=float(str(pos.avg_entry_price)),
             unrealized_pnl=float(str(pos.unrealized_pnl)),
             realized_pnl=float(str(pos.realized_pnl)),
+            liquidation_price=float(str(getattr(pos, "liquidation_price", 0.0) or 0.0)),
             open_order_count=int(pos.open_order_count),
             pending_order_count=int(pos.pending_order_count),
         )
 
     return PositionSnapshot(
         market_id=market_id, symbol="", sign=0, position=0.0,
-        avg_entry_price=0.0, unrealized_pnl=0.0, realized_pnl=0.0,
+        avg_entry_price=0.0, unrealized_pnl=0.0, realized_pnl=0.0, liquidation_price=0.0,
         open_order_count=0, pending_order_count=0,
+    )
+
+
+async def fetch_account_snapshot(
+    account_api: lighter.AccountApi,
+    account_index: int,
+) -> Optional[AccountSnapshot]:
+    resp = await account_api.account(by="index", value=str(account_index))
+    accounts = resp.accounts or []
+    if not accounts:
+        return None
+    account = accounts[0]
+    return AccountSnapshot(
+        total_asset_value=float(str(getattr(account, "total_asset_value", 0.0) or 0.0)),
+        available_balance=float(str(getattr(account, "available_balance", 0.0) or 0.0)),
     )
 
 

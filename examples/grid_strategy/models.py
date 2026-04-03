@@ -39,8 +39,15 @@ class PositionSnapshot:
     avg_entry_price:    float
     unrealized_pnl:     float
     realized_pnl:       float
+    liquidation_price:  float
     open_order_count:   int
     pending_order_count: int
+
+
+@dataclass
+class AccountSnapshot:
+    total_asset_value:  float
+    available_balance:  float
 
 
 @dataclass

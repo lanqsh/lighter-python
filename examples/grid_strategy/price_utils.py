@@ -89,16 +89,24 @@ def split_position_amounts(total_amount: int, chunk_amount: int, min_base_amount
 
 
 def should_cancel_far_order(
-    slot: GridSlot, side: str, aligned: float, far_threshold: float
+    slot: GridSlot,
+    side: str,
+    aligned: float,
+    far_threshold: float,
+    price_step: float,
+    levels: int,
 ) -> Tuple[bool, str, int, float]:
+    long_entry_floor = aligned - price_step * max(levels - 1, 0)
+    short_entry_ceiling = aligned + price_step * levels
+
     if side == SIDE_LONG:
-        if slot.status == SLOT_NEW and slot.place_price < aligned - far_threshold:
+        if slot.status == SLOT_NEW and slot.place_price < long_entry_floor:
             return True, "entry", slot.place_order_idx, slot.place_price
         if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_price > aligned + far_threshold:
             return True, "tp", slot.tp_order_idx, slot.tp_price
         return False, "", 0, 0.0
 
-    if slot.status == SLOT_NEW and slot.place_price > aligned + far_threshold:
+    if slot.status == SLOT_NEW and slot.place_price > short_entry_ceiling:
         return True, "entry", slot.place_order_idx, slot.place_price
     if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_price < aligned - far_threshold:
         return True, "tp", slot.tp_order_idx, slot.tp_price

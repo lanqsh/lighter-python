@@ -1,16 +1,17 @@
 {
   "baseUrl": "https://mainnet.zklighter.elliot.ai",
   "accountIndex": 123,
+  "barkServer": "https://api.day.app/your_device_key",
   "privateKeys": {
     "0": "0xyour_api_private_key_hex"
   },
   "grid": {
-    "marketId": "ETH",
-    "levels": 4,
-    "side": "long",
-    "priceStep": 5,
-    "baseAmount": 0,
-    "leverage": 1,
-    "pollIntervalSec": 5
+      "marketId": "ETH",
+      "side": "long",
+      "levels": 5,
+      "priceStep": 10,
+      "baseAmount": 100,
+      "leverage": 10,
+      "pollIntervalSec": 3
   }
 }

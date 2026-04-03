@@ -3,8 +3,10 @@ import asyncio
 import datetime as _dt
 import logging
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 EXAMPLES_DIR = ROOT_DIR / "examples"
@@ -17,16 +19,89 @@ import lighter
 
 from examples.grid_strategy.auth import AuthTokenManager
 from examples.grid_strategy.config import load_api_key_config, load_grid_config, normalize_side
-from examples.grid_strategy.exchange import fetch_market_detail, initialize_runtime_monitor, is_retryable_exception
+from examples.grid_strategy.exchange import (
+    fetch_account_snapshot,
+    fetch_market_detail,
+    initialize_runtime_monitor,
+    is_retryable_exception,
+)
 from examples.grid_strategy.grid_engine import run_one_cycle, seed_startup_position_take_profits
 from examples.grid_strategy.market_utils import resolve_market_id_by_selector
-from examples.grid_strategy.models import GridState, RuntimeMonitor
+from examples.grid_strategy.models import GridState, RuntimeMonitor, position_size_signed
 from examples.grid_strategy.order_executor import cancel_all_active_orders_for_market
 from examples.grid_strategy.price_utils import resolve_effective_base_amount
 from examples.grid_strategy.trace import LOGGER, setup_logging, setup_order_trace_file
 
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+_BARK_ESCAPING_MAP = {
+    " ": "%20", '"': "%22", "#": "%23", "%": "%25", "&": "%26",
+    "(": "%28", ")": "%29", "+": "%2B", ",": "%2C", "/": "%2F",
+    ":": "%3A", ";": "%3B", "<": "%3C", "=": "%3D", ">": "%3E",
+    "?": "%3F", "@": "%40", "\\": "%5C", "|": "%7C", "`": "\\`",
+    "*": "\\*", "$": "\\$", "[": "%5B", "]": "%5D", "^": "%5E",
+    "{": "%7B", "}": "%7D", "~": "%7E", "\n": "%0A",
+}
+
+
+def _escape_bark_message(message: str) -> str:
+    return "".join(_BARK_ESCAPING_MAP.get(ch, ch) for ch in message)
+
+
+def _send_bark_message(bark_server: str, message: str) -> None:
+    if not bark_server:
+        return
+    endpoint = bark_server.rstrip("/") + "/"
+    ring = "?level=critical&volume=1"
+    url = endpoint + _escape_bark_message(message) + ring
+    with urllib.request.urlopen(url, timeout=10):
+        pass
+
+
+async def maybe_send_daily_bark_report(
+    bark_server: str,
+    last_report_date: str,
+    account_api: lighter.AccountApi,
+    account_index: int,
+    market_symbol: str,
+    grid_side: str,
+    monitor: RuntimeMonitor,
+    state: GridState,
+    current_price: float,
+) -> str:
+    if not bark_server:
+        return last_report_date
+
+    now_sh = _dt.datetime.now(SHANGHAI_TZ)
+    today_sh = now_sh.date().isoformat()
+    if now_sh.hour < 8 or last_report_date == today_sh:
+        return last_report_date
+
+    account_snapshot = await fetch_account_snapshot(account_api, account_index)
+    total_asset_value = account_snapshot.total_asset_value if account_snapshot is not None else 0.0
+    available_balance = account_snapshot.available_balance if account_snapshot is not None else 0.0
+    signed_position = position_size_signed(monitor.last_position)
+    liquidation_price = monitor.last_position.liquidation_price if monitor.last_position is not None else 0.0
+    report_symbol = monitor.last_position.symbol if monitor.last_position is not None and monitor.last_position.symbol else market_symbol
+
+    today_tp = state.today_tp_count if state.today_tp_date == today_sh else 0
+    message = (
+        f"lighter Daily Report\n"
+        f"symbol={report_symbol}\n"
+        f"side={grid_side}\n"
+        f"position={signed_position:.6f}\n"
+        f"today_tp={today_tp}\n"
+        f"liq_price={liquidation_price:.4f}\n"
+        f"total_balance={total_asset_value:.4f}\n"
+        f"available_balance={available_balance:.4f}\n"
+        f"price={current_price:.4f}"
+    )
+
+    await asyncio.to_thread(_send_bark_message, bark_server, message)
+    LOGGER.info("[bark:daily-report] sent date=%s shanghai_time=%s", today_sh, now_sh.isoformat())
+    return today_sh
+
 async def run_strategy() -> None:
-    base_url, account_index, private_keys, resolved_cfg_path = load_api_key_config()
+    base_url, account_index, private_keys, resolved_cfg_path, bark_server = load_api_key_config()
     cfg = load_grid_config(resolved_cfg_path)
     if cfg.levels <= 0:
         raise ValueError("levels must be > 0")
@@ -51,6 +126,7 @@ async def run_strategy() -> None:
     log_path = setup_logging(cfg.market_id, cfg.side)
     trace_path = setup_order_trace_file(cfg.market_id, cfg.side)
     LOGGER.info("[config] using: %s", resolved_cfg_path)
+    LOGGER.info("[config] bark_enabled=%s", bool(bark_server))
     LOGGER.info(
         "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s tp_refill_min_steps=%s tp_refill_max_steps=%s",
         cfg.market_symbol, resolved_symbol, cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
@@ -206,6 +282,7 @@ async def run_strategy() -> None:
         LOGGER.info("state: %s", state.summary())
 
         cycle = 0
+        last_bark_report_date = ""
         while cfg.max_cycles == 0 or cycle < cfg.max_cycles:
             await asyncio.sleep(cfg.poll_interval_sec)
 
@@ -266,6 +343,22 @@ async def run_strategy() -> None:
                 today_tp,
                 today,
             )
+
+            try:
+                last_bark_report_date = await maybe_send_daily_bark_report(
+                    bark_server=bark_server,
+                    last_report_date=last_bark_report_date,
+                    account_api=account_api,
+                    account_index=account_index,
+                    market_symbol=symbol,
+                    grid_side=cfg.side,
+                    monitor=monitor,
+                    state=state,
+                    current_price=current_price,
+                )
+            except Exception as bark_exc:
+                LOGGER.warning("[bark:daily-report] failed reason=%s", bark_exc)
+
             cycle += 1
 
     finally:
