@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Any, List, Optional
 
@@ -12,6 +13,32 @@ from examples.grid_strategy.models import (
 )
 
 LOGGER = logging.getLogger("smart_grid")
+
+
+def format_api_exception(exc: Exception) -> str:
+    """Return a concise summary of an ApiException, parsing the JSON body when available."""
+    status = getattr(exc, "status", None)
+    body = getattr(exc, "body", None)
+    if body:
+        try:
+            parsed = json.loads(body)
+            code = parsed.get("code")
+            message = parsed.get("message")
+            if code is not None or message is not None:
+                return f"http_status={status} code={code} message={message}"
+        except Exception:
+            pass
+    reason = getattr(exc, "reason", None)
+    if status is not None:
+        return f"http_status={status} reason={reason}"
+    return str(exc)
+
+
+def is_rate_limited_exception(exc: Exception) -> bool:
+    """Return True when the server explicitly responded with HTTP 429."""
+    if isinstance(exc, ApiException):
+        return getattr(exc, "status", None) == 429
+    return False
 
 
 def is_retryable_exception(exc: Exception) -> bool:
@@ -31,12 +58,27 @@ def is_retryable_exception(exc: Exception) -> bool:
 
 
 async def fetch_market_detail(order_api: lighter.OrderApi, market_id: int) -> Any:
-    resp = await order_api.order_book_details(market_id=market_id)
-    if resp.order_book_details:
-        return resp.order_book_details[0]
-    if resp.spot_order_book_details:
-        return resp.spot_order_book_details[0]
-    raise RuntimeError(f"No market detail for market_id={market_id}")
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = await order_api.order_book_details(market_id=market_id)
+            if resp.order_book_details:
+                return resp.order_book_details[0]
+            if resp.spot_order_book_details:
+                return resp.spot_order_book_details[0]
+            raise RuntimeError(f"No market detail for market_id={market_id}")
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            if not is_retryable_exception(exc) or attempt >= max_attempts:
+                raise
+            delay = 0.6 * attempt
+            LOGGER.warning(
+                "[market-detail:retry] market_id=%s attempt=%s/%s reason=%s sleep=%.1fs",
+                market_id, attempt, max_attempts, format_api_exception(exc), delay,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError(f"fetch_market_detail exhausted retries for market_id={market_id}")
 
 
 async def fetch_active_orders(
@@ -60,7 +102,7 @@ async def fetch_active_orders(
             delay = 0.6 * attempt
             LOGGER.warning(
                 "[orders:retry] market_id=%s account=%s attempt=%s/%s reason=%s sleep=%.1fs",
-                market_id, account_index, attempt, max_attempts, exc, delay,
+                market_id, account_index, attempt, max_attempts, format_api_exception(exc), delay,
             )
             await asyncio.sleep(delay)
     return []
@@ -139,7 +181,7 @@ async def fetch_recent_trades(
             delay = 0.6 * attempt
             LOGGER.warning(
                 "[trade:retry] market_id=%s account=%s attempt=%s/%s reason=%s sleep=%.1fs",
-                market_id, account_index, attempt, max_attempts, exc, delay,
+                market_id, account_index, attempt, max_attempts, format_api_exception(exc), delay,
             )
             await asyncio.sleep(delay)
     return []

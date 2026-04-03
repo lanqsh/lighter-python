@@ -22,7 +22,9 @@ from examples.grid_strategy.config import load_api_key_config, load_grid_config,
 from examples.grid_strategy.exchange import (
     fetch_account_snapshot,
     fetch_market_detail,
+    format_api_exception,
     initialize_runtime_monitor,
+    is_rate_limited_exception,
     is_retryable_exception,
 )
 from examples.grid_strategy.grid_engine import run_one_cycle, seed_startup_position_take_profits
@@ -283,10 +285,37 @@ async def run_strategy() -> None:
 
         cycle = 0
         last_bark_report_date = ""
+        _POLL_BACKOFF_FACTOR     = 1.5
+        _POLL_MAX_SEC            = cfg.poll_interval_sec * 3.0
+        _RATE_LIMIT_COOLDOWN_SEC = 60.0
+        _in_rate_limit           = False
+
         while cfg.max_cycles == 0 or cycle < cfg.max_cycles:
             await asyncio.sleep(cfg.poll_interval_sec)
 
-            market_detail = await fetch_market_detail(order_api, cfg.market_id)
+            try:
+                market_detail = await fetch_market_detail(order_api, cfg.market_id)
+            except Exception as e:
+                if is_retryable_exception(e):
+                    if is_rate_limited_exception(e):
+                        if not _in_rate_limit:
+                            new_interval = min(cfg.poll_interval_sec * _POLL_BACKOFF_FACTOR, _POLL_MAX_SEC)
+                            LOGGER.warning(
+                                "[cycle:rate-limit] cycle=%s reason=%s poll_interval %.1fs -> %.1fs cooldown=%.0fs",
+                                cycle, format_api_exception(e), cfg.poll_interval_sec, new_interval, _RATE_LIMIT_COOLDOWN_SEC,
+                            )
+                            cfg.poll_interval_sec = new_interval
+                            _in_rate_limit = True
+                        else:
+                            LOGGER.warning(
+                                "[cycle:rate-limit] cycle=%s still rate-limited, cooldown=%.0fs",
+                                cycle, _RATE_LIMIT_COOLDOWN_SEC,
+                            )
+                        await asyncio.sleep(_RATE_LIMIT_COOLDOWN_SEC)
+                    else:
+                        LOGGER.warning("[cycle:market-detail-error] cycle=%s reason=%s", cycle, format_api_exception(e))
+                    continue
+                raise
             current_price = float(market_detail.last_trade_price)
 
             LOGGER.info("cycle=%s price=%.4f %s", cycle, current_price, state.summary())
@@ -330,9 +359,27 @@ async def run_strategy() -> None:
                 )
             except Exception as e:
                 if is_retryable_exception(e):
-                    LOGGER.warning("[cycle:transient-error] cycle=%s reason=%s", cycle, e)
+                    if is_rate_limited_exception(e):
+                        if not _in_rate_limit:
+                            new_interval = min(cfg.poll_interval_sec * _POLL_BACKOFF_FACTOR, _POLL_MAX_SEC)
+                            LOGGER.warning(
+                                "[cycle:rate-limit] cycle=%s reason=%s poll_interval %.1fs -> %.1fs cooldown=%.0fs",
+                                cycle, format_api_exception(e), cfg.poll_interval_sec, new_interval, _RATE_LIMIT_COOLDOWN_SEC,
+                            )
+                            cfg.poll_interval_sec = new_interval
+                            _in_rate_limit = True
+                        else:
+                            LOGGER.warning(
+                                "[cycle:rate-limit] cycle=%s still rate-limited, cooldown=%.0fs",
+                                cycle, _RATE_LIMIT_COOLDOWN_SEC,
+                            )
+                        await asyncio.sleep(_RATE_LIMIT_COOLDOWN_SEC)
+                    else:
+                        LOGGER.warning("[cycle:transient-error] cycle=%s reason=%s", cycle, format_api_exception(e))
                 else:
                     raise
+            else:
+                _in_rate_limit = False
 
             today = _dt.date.today().isoformat()
             today_tp = state.today_tp_count if state.today_tp_date == today else 0
@@ -380,7 +427,7 @@ async def run_strategy() -> None:
                 canceled_on_exit,
             )
         except Exception as cleanup_exc:
-            LOGGER.warning("[cleanup:shutdown] failed market_id=%s reason=%s", cfg.market_id, cleanup_exc)
+            LOGGER.warning("[cleanup:shutdown] failed market_id=%s reason=%s", cfg.market_id, format_api_exception(cleanup_exc))
         for c, name in [(client, "SignerClient"), (api_client, "ApiClient")]:
             try:
                 await c.close()
