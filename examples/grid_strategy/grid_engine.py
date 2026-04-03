@@ -13,7 +13,7 @@ from examples.grid_strategy.models import (
     SLOT_IDLE, SLOT_NEW, SLOT_FILLED, SIDE_LONG, SIDE_SHORT,
     position_size_signed,
 )
-from examples.grid_strategy.order_executor import do_place_order, do_cancel_order, record_order_lifecycle
+from examples.grid_strategy.order_executor import do_place_order, do_cancel_order, record_order_lifecycle, do_market_add_position
 from examples.grid_strategy.price_utils import (
     price_to_wire, size_to_wire,
     split_position_amounts, should_cancel_far_order,
@@ -21,6 +21,34 @@ from examples.grid_strategy.price_utils import (
 from examples.grid_strategy.trace import now_iso_ms, append_filled_order_trace_record
 
 LOGGER = logging.getLogger("smart_grid")
+
+
+def _escape_bark_message(message: str) -> str:
+    """Escape message for bark API."""
+    _bark_escaping_map = {
+        " ": "%20", '"': "%22", "#": "%23", "%": "%25", "&": "%26",
+        "(": "%28", ")": "%29", "+": "%2B", ",": "%2C", "/": "%2F",
+        ":": "%3A", ";": "%3B", "<": "%3C", "=": "%3D", ">": "%3E",
+        "?": "%3F", "@": "%40", "\\": "%5C", "|": "%7C", "`": "\\`",
+        "*": "\\*", "$": "\\$", "[": "%5B", "]": "%5D", "^": "%5E",
+        "{": "%7B", "}": "%7D", "~": "%7E", "\n": "%0A",
+    }
+    return "".join(_bark_escaping_map.get(ch, ch) for ch in message)
+
+
+def _send_bark_message_impl(bark_server: str, message: str) -> None:
+    """Send message to bark server."""
+    import urllib.request
+    if not bark_server:
+        return
+    endpoint = bark_server.rstrip("/") + "/"
+    ring = "?level=critical&volume=1"
+    url = endpoint + _escape_bark_message(message) + ring
+    try:
+        with urllib.request.urlopen(url, timeout=10):
+            pass
+    except Exception as e:
+        LOGGER.warning("[bark] send failed: %s", e)
 
 
 def get_order_base_amount(order: Any) -> int:
@@ -296,6 +324,108 @@ async def seed_startup_position_take_profits(
     return seeded_count
 
 
+async def check_and_add_position(
+    monitor:     RuntimeMonitor,
+    client:      lighter.SignerClient,
+    state:       GridState,
+    cfg:         GridConfig,
+    evidence:    TradeEvidence,
+    side:        str,
+    base_amount: int,
+    bark_server: str,
+    size_decimals: int,
+) -> bool:
+    """
+    Check if current position is below target. If so, add position via market order.
+
+    Target position = levels * base_amount
+    Transaction direction:
+    - For LONG: use is_ask=False (BUY)
+    - For SHORT: use is_ask=True (SELL)
+
+    Returns:
+        True if position was added, False otherwise
+    """
+    import time
+
+    target_position_amount = cfg.levels * base_amount
+    current_position = position_size_signed(evidence.position_after)
+
+    # For LONG side: we want current_position to be >= target position (positive)
+    # For SHORT side: we want current_position to be <= -target position (negative)
+    if side == SIDE_LONG:
+        if current_position >= target_position_amount:
+            LOGGER.info(
+                "[add-position] skip LONG current=%.6f target=%.6f (levels=%s base_amount=%s)",
+                current_position, target_position_amount, cfg.levels, base_amount,
+            )
+            return False
+        add_amount = int(target_position_amount - current_position)
+    else:  # SIDE_SHORT
+        if current_position <= -target_position_amount:
+            LOGGER.info(
+                "[add-position] skip SHORT current=%.6f target=-%.6f (levels=%s base_amount=%s)",
+                current_position, target_position_amount, cfg.levels, base_amount,
+            )
+            return False
+        add_amount = int(-target_position_amount - current_position)
+
+    # Ensure add_amount is positive and at least 1
+    if add_amount <= 0:
+        return False
+
+    # Check 60-second interval
+    now = time.time()
+    if now - monitor.last_add_position_time < 60:
+        time_since_last = now - monitor.last_add_position_time
+        LOGGER.info(
+            "[add-position] throttled by interval check side=%s last_add=%.1fs ago (need >60s)",
+            side, time_since_last,
+        )
+        return False
+
+    order_idx = state.alloc_idx()
+    is_ask = side == SIDE_SHORT  # For LONG, is_ask=False; for SHORT, is_ask=True
+    label = f"{side.upper()} market-add-position target={target_position_amount:.6f} add={add_amount}"
+
+    LOGGER.info(
+        "[add-position:execute] side=%s current=%.6f target=%.6f add_amount=%s coi=%s",
+        side, current_position, target_position_amount, add_amount, order_idx,
+    )
+
+    ok = await do_market_add_position(
+        monitor=monitor, client=client, market_id=cfg.market_id,
+        order_idx=order_idx, base_amount=add_amount,
+        is_ask=is_ask, dry_run=cfg.dry_run, label=label,
+    )
+
+    if ok:
+        monitor.last_add_position_time = now
+        LOGGER.info(
+            "[add-position:success] side=%s target=%.6f added=%s coi=%s",
+            side, target_position_amount, add_amount, order_idx,
+        )
+        # Send bark message
+        message = (
+            f"[lighter] Market Add Position\n"
+            f"side={side.upper()}\n"
+            f"current_position={current_position / (10 ** size_decimals):.4f}\n"
+            f"target_position={target_position_amount / (10 ** size_decimals):.4f}\n"
+            f"added_amount={add_amount / (10 ** size_decimals):.4f}\n"
+            f"symbol={cfg.market_symbol}\n"
+            f"leverage={cfg.leverage}x"
+        )
+        if bark_server:
+            await asyncio.to_thread(_send_bark_message_impl, bark_server, message)
+        return True
+    else:
+        LOGGER.warning(
+            "[add-position:failed] side=%s target=%.6f failed_add=%s coi=%s",
+            side, target_position_amount, add_amount, order_idx,
+        )
+        return False
+
+
 async def run_one_cycle(
     monitor:        RuntimeMonitor,
     account_api:    lighter.AccountApi,
@@ -308,6 +438,8 @@ async def run_one_cycle(
     base_amount:    int,
     account_index:  int,
     auth_mgr:       AuthTokenManager,
+    size_decimals:  int,
+    bark_server:    str = "",
 ) -> None:
     side = normalize_side(cfg.side)
 
@@ -331,6 +463,12 @@ async def run_one_cycle(
             bool(active_order.is_ask), bool(active_order.reduce_only),
             slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
         )
+
+    # ── Check and add position if needed ──────────────────────────────────
+    await check_and_add_position(
+        monitor=monitor, client=client, state=state, cfg=cfg,
+        evidence=evidence, side=side, base_amount=base_amount, bark_server=bark_server, size_decimals=size_decimals,
+    )
 
     aligned       = (int(current_price / cfg.price_step)) * cfg.price_step
     far_threshold = cfg.price_step * cfg.levels * 2

@@ -177,3 +177,64 @@ async def cancel_all_active_orders_for_market(
                 reason, market_id, exchange_order_index, client_order_index, exc,
             )
     return canceled
+
+
+async def do_market_add_position(
+    monitor:        RuntimeMonitor,
+    client:         lighter.SignerClient,
+    market_id:      int,
+    order_idx:      int,
+    base_amount:    int,
+    is_ask:         bool,
+    dry_run:        bool,
+    label:          str,
+) -> bool:
+    """
+    Place a market order to add position.
+
+    Args:
+        monitor: RuntimeMonitor for tracking
+        client: SignerClient
+        market_id: Market ID
+        order_idx: Client order index
+        base_amount: Amount to add (in base asset)
+        is_ask: True for short, False for long
+        dry_run: If True, don't actually place the order
+        label: Description label for logging
+
+    Returns:
+        True if order was successfully placed, False otherwise
+    """
+    submit_time = now_iso_ms()
+    LOGGER.info(
+        "[market-order:req] label=%s coi=%s market=%s base_amount=%s is_ask=%s",
+        label, order_idx, market_id, base_amount, is_ask,
+    )
+    record_order_lifecycle(monitor, order_idx, label, "market-request", is_ask, False)
+
+    if dry_run:
+        LOGGER.info("[market-order:dry-run] label=%s coi=%s", label, order_idx)
+        record_order_lifecycle(monitor, order_idx, label, "dry-run", is_ask, False)
+        return True
+
+    # Use price=0 for market order (will be filled at current market price)
+    _, tx_hash, err = await client.create_order(
+        market_index=market_id,
+        client_order_index=order_idx,
+        base_amount=base_amount,
+        price=0,  # 0 indicates market order
+        is_ask=is_ask,
+        order_type=client.ORDER_TYPE_MARKET,
+        time_in_force=client.ORDER_TIME_IN_FORCE_IMMEDIATE_OR_CANCEL,
+        reduce_only=False,
+        trigger_price=0,
+    )
+    if err is not None:
+        LOGGER.warning("[market-order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+        record_order_lifecycle(monitor, order_idx, label, "rejected", is_ask, False, tx_hash=str(tx_hash or ""), error=str(err))
+        return False
+
+    LOGGER.info("[market-order:resp] label=%s coi=%s tx_hash=%s err=None", label, order_idx, tx_hash)
+    record_order_lifecycle(monitor, order_idx, label, "accepted", is_ask, False, tx_hash=str(tx_hash or ""))
+    monitor.order_submit_times[order_idx] = submit_time
+    return True

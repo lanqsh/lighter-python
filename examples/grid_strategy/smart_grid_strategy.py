@@ -354,8 +354,10 @@ async def run_strategy() -> None:
                     current_price=current_price,
                     price_decimals=price_decimals,
                     base_amount=cycle_base_amount,
+                    size_decimals=size_decimals,
                     account_index=account_index,
                     auth_mgr=auth_mgr,
+                    bark_server=bark_server,
                 )
             except Exception as e:
                 if is_retryable_exception(e):
