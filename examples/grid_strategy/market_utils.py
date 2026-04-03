@@ -3,9 +3,7 @@ from typing import Any, List, Tuple
 
 import lighter
 
-
-HOST = "https://mainnet.zklighter.elliot.ai"
-TARGET = "DOGE"
+from examples.grid_strategy.config import load_api_key_config, load_grid_config
 
 
 async def query_markets_by_selector(order_api: lighter.OrderApi, selector: str) -> List[Any]:
@@ -38,15 +36,19 @@ async def resolve_market_id_by_selector(order_api: lighter.OrderApi, selector: s
 
 
 async def main() -> None:
-    cfg = lighter.Configuration(host=HOST)
+    base_url, _, _, resolved_cfg_path, _ = load_api_key_config()
+    grid_cfg = load_grid_config(resolved_cfg_path)
+    target = grid_cfg.market_symbol
+
+    cfg = lighter.Configuration(host=base_url)
     api_client = lighter.ApiClient(cfg)
     api = lighter.OrderApi(api_client)
 
     try:
-        rows = await query_markets_by_selector(api, TARGET)
+        rows = await query_markets_by_selector(api, target)
 
         if not rows:
-            print("No DOGE market found")
+            print(f"No market found for selector={target}")
             return
 
         for ob in sorted(rows, key=lambda x: x.market_id):

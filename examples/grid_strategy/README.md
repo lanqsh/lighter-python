@@ -1,10 +1,9 @@
 # Grid Strategy Example
 
-This folder contains two grid strategy implementations for the Lighter Python SDK.
+This folder contains the grid strategy implementation for the Lighter Python SDK.
 
 | 文件 | 说明 |
 |------|------|
-| `simple_grid_strategy.py` | 基础网格策略（双向，无状态持久化） |
 | `smart_grid_strategy.py` | **推荐** 智能单向网格策略（无状态新网格、自动止盈、日志监控） |
 | `api_key_config.example.json` | 配置文件示例 |
 | `market_utils.py` | 查询指定市场的 marketId、精度、最小下单量等信息 |
@@ -17,6 +16,9 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 
 - **单向网格**：通过 `side=long/short` 配置，只做多或只做空，适配 DEX 单向持仓模式
 - **自动止盈**：开仓单成交后自动在 `entry+price_step` 挂止盈单
+- **TP 容量治理**：当同方向 TP 达到上限（`levels`）时，优先替换距离当前价更远的 TP
+- **TP 自恢复**：当 TP 下单失败或出现“有仓位但无 TP”时，后续轮询会自动补挂
+- **远端挂单清理**：运行中会按当前网格有效价格带清理偏离过远的 entry/TP
 - **无状态新网格**：每次启动都视为新的网格会话，不读取历史状态文件
 - **启动/退出自动清挂单**：仅取消当前交易对挂单，保留已有仓位不动
 - **全仓模式**：设置杠杆时自动使用全仓（cross margin）
@@ -25,6 +27,7 @@ This folder contains two grid strategy implementations for the Lighter Python SD
 - **成交确认**：通过成交记录和仓位变化双重证据确认开仓/止盈是否真实成交
 - **日志监控**：滚动文件日志 + 控制台双输出，记录代码行号、下单请求/响应、仓位变化、成交情况、每格生命周期
 - **TP 统计**：每次止盈成交后打印 `total_tp`（累计总次数）和 `today_tp`（当日次数，每天自动归零）
+- **Bark 日报**：配置 `barkServer` 后，每天上海时间 08:00 推送一次日报（币种、方向、仓位、当天 TP、强平价、总余额、可用余额、现价）
 
 ### 快速开始
 
@@ -70,6 +73,7 @@ python -m examples.grid_strategy
 {
   "baseUrl": "https://mainnet.zklighter.elliot.ai",
   "accountIndex": 123,
+  "barkServer": "https://api.day.app/your_device_key",
   "privateKeys": {
     "0": "0xyour_api_private_key_hex"
   },
@@ -80,7 +84,9 @@ python -m examples.grid_strategy
     "priceStep": 10,
     "baseAmount": 0,
     "leverage": 3,
-    "pollIntervalSec": 5
+    "pollIntervalSec": 5,
+    "tpRefillMinSteps": 3,
+    "tpRefillMaxSteps": 0
   }
 }
 ```
@@ -89,6 +95,7 @@ python -m examples.grid_strategy
 
 | 配置文件键 | 默认值 | 说明 |
 |---|---|---|
+| `barkServer` | `""` | Bark 推送地址（顶层字段，非 `grid` 内）。留空则不发送日报 |
 | `marketId` | `"0"` | 市场选择器，可填市场 ID 或符号前缀，如 `"ETH"` |
 | `side` | `long` | 仓位方向：`long` 或 `short` |
 | `levels` | `10` | 网格层数 |
@@ -96,6 +103,14 @@ python -m examples.grid_strategy
 | `baseAmount` | `0` | 每格下单数量（wire 整数）。`0` = 按最深网格价自动计算最小合法数量 |
 | `leverage` | `1` | 杠杆倍数；超过市场上限自动降至上限 |
 | `pollIntervalSec` | `5.0` | 每轮轮询间隔（秒） |
+| `tpRefillMinSteps` | `3` | TP 重挂最小距离门槛（单位：格） |
+| `tpRefillMaxSteps` | `0` | TP 重挂最大距离门槛（单位：格）。`0` 表示使用策略自动上限 |
+
+### Bark 日报说明
+
+- 触发时间：每天上海时间 08:00（Asia/Shanghai）
+- 触发条件：配置了 `barkServer` 且当天尚未发送
+- 推送字段：`symbol`、`side`、`position`、`today_tp`、`liq_price`、`total_balance`、`available_balance`、`price`
 
 ### baseAmount 填写说明
 
