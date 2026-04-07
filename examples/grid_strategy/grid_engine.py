@@ -52,7 +52,7 @@ def _send_bark_message_impl(bark_server: str, message: str) -> None:
 
 
 def get_order_base_amount(order: Any) -> int:
-    for field_name in ("base_amount", "amount", "size"):
+    for field_name in ("initial_base_amount", "base_amount", "amount", "size"):
         value = getattr(order, field_name, None)
         if value is None:
             continue
@@ -610,6 +610,10 @@ async def run_one_cycle(
             slot.status = SLOT_FILLED
 
     # ── Detect TP fills ──────────────────────────────────────────────────────
+    # Track TP prices that fired this cycle to avoid placing a new entry at the
+    # exact same price in the same cycle (which would immediately re-open the
+    # position that was just closed).
+    filled_tp_prices: set = set()
     all_slots = list(active_slots)
     for slot in all_slots:
         if slot.status != SLOT_FILLED:
@@ -637,6 +641,7 @@ async def run_one_cycle(
                     "reset-idle-zero-position", slot.is_long, True, slot=slot, slot_kind="tp",
                 )
                 slot.status = SLOT_IDLE
+                filled_tp_prices.add(slot.tp_price)
                 continue
             LOGGER.warning(
                 "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
@@ -650,6 +655,7 @@ async def run_one_cycle(
             continue
 
         slot.status = SLOT_IDLE
+        filled_tp_prices.add(slot.tp_price)
         state.success_count += 1
         _today = _dt.date.today().isoformat()
         if state.today_tp_date != _today:
@@ -744,6 +750,12 @@ async def run_one_cycle(
             place_price = aligned - cfg.price_step * i
             if place_price <= 0 or place_price >= current_price:
                 continue
+            if place_price in filled_tp_prices:
+                LOGGER.info(
+                    "[entry:skip-tp-reopen] side=long place_price=%.4f is a tp level that just fired this cycle",
+                    place_price,
+                )
+                continue
             k    = GridState.price_key(place_price)
             slot = state.long_slots.get(k)
             if slot is None:
@@ -766,6 +778,12 @@ async def run_one_cycle(
         for i in range(1, cfg.levels + 1):
             place_price = aligned + cfg.price_step * i
             if place_price <= current_price:
+                continue
+            if place_price in filled_tp_prices:
+                LOGGER.info(
+                    "[entry:skip-tp-reopen] side=short place_price=%.4f is a tp level that just fired this cycle",
+                    place_price,
+                )
                 continue
             k    = GridState.price_key(place_price)
             slot = state.short_slots.get(k)
