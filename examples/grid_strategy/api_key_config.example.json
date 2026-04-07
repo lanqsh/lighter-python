@@ -10,7 +10,7 @@
       "side": "long",
       "levels": 5,
       "priceStep": 10,
-      "baseAmount": 100,
+      "baseAmount": 0.06,
       "leverage": 10,
       "pollIntervalSec": 3
   }

@@ -102,7 +102,7 @@ python -m examples.grid_strategy
     "side": "long",
     "levels": 5,
     "priceStep": 10,
-    "baseAmount": 0,
+    "baseAmount": 0.06,
     "leverage": 3,
     "pollIntervalSec": 5,
     "tpRefillMinSteps": 3,
@@ -120,7 +120,7 @@ python -m examples.grid_strategy
 | `side` | `long` | 网格方向：`long` 或 `short` |
 | `levels` | `10` | 网格层数 |
 | `priceStep` | `10.0` | 相邻网格价差（human 单位） |
-| `baseAmount` | `0` | 下单数量（wire 整数）；`0` 表示自动计算最小合法值 |
+| `baseAmount` | `0` | 下单数量（代币数量，float）；`0` 表示自动计算最小合法值。例：`0.06` 表示每格下单 0.06 个代币 |
 | `leverage` | `1` | 杠杆倍数；超过市场上限会自动降级 |
 | `pollIntervalSec` | `5.0` | 基础轮询间隔（秒） |
 | `tpRefillMinSteps` | `3` | TP 重挂最小距离（单位：格） |
@@ -136,15 +136,12 @@ python -m examples.grid_strategy
 
 ## baseAmount 说明
 
-`baseAmount` 是 wire 整数，不是小数数量：
+`baseAmount` 是代币数量（float），直接填写目标下单量：
 
-```text
-baseAmount = 目标数量 * 10^size_decimals
-```
+- `0.06` 表示每个网格下单 0.06 个代币（如 0.06 ETH）
+- `0` 表示自动计算满足最小名义金额的合法下单量
 
-示例：若 `size_decimals=4`，下单 `0.006 ETH`，则 `baseAmount=60`。
-
-当 `baseAmount=0` 时，策略会按最深网格价格自动计算满足最小名义金额的合法下单量。
+策略内部会按市场精度（`size_decimals`）将其转换为 wire 整数再下单。
 
 ## 日志与运行行为
 

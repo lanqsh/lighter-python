@@ -1,9 +1,6 @@
-import asyncio
 from typing import Any, List, Tuple
 
 import lighter
-
-from examples.grid_strategy.config import load_api_key_config, load_grid_config
 
 
 async def query_markets_by_selector(order_api: lighter.OrderApi, selector: str) -> List[Any]:
@@ -35,33 +32,3 @@ async def resolve_market_id_by_selector(order_api: lighter.OrderApi, selector: s
     return int(chosen.market_id), str(chosen.symbol)
 
 
-async def main() -> None:
-    base_url, _, _, resolved_cfg_path, _ = load_api_key_config()
-    grid_cfg = load_grid_config(resolved_cfg_path)
-    target = grid_cfg.market_symbol
-
-    cfg = lighter.Configuration(host=base_url)
-    api_client = lighter.ApiClient(cfg)
-    api = lighter.OrderApi(api_client)
-
-    try:
-        rows = await query_markets_by_selector(api, target)
-
-        if not rows:
-            print(f"No market found for selector={target}")
-            return
-
-        for ob in sorted(rows, key=lambda x: x.market_id):
-            sd = int(ob.supported_size_decimals)
-            base_amount_for_10 = 10 * (10 ** sd)
-            print(
-                f"symbol={ob.symbol} marketId={ob.market_id} marketType={ob.market_type} "
-                f"size_decimals={sd} min_base_amount={ob.min_base_amount} "
-                f"baseAmount_for_10_DOGE={base_amount_for_10}"
-            )
-    finally:
-        await api_client.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

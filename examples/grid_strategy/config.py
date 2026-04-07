@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from examples.grid_strategy.models import GridConfig, SIDE_LONG, SIDE_SHORT
+from models import GridConfig, SIDE_LONG, SIDE_SHORT
 
 
 GRID_STRATEGY_DIR = Path(__file__).resolve().parent
@@ -21,7 +21,7 @@ def default_grid_config() -> GridConfig:
         market_id=0,
         levels=10,
         price_step=10.0,
-        base_amount=0,
+        base_amount=0.0,
         side=SIDE_LONG,
         poll_interval_sec=5.0,
         max_cycles=0,
@@ -53,7 +53,7 @@ def load_grid_config(resolved_config_file: str) -> GridConfig:
         ("levels",            "levels",          int),
         ("price_step",        "priceStep",        float),
         ("leverage",          "leverage",         int),
-        ("base_amount",       "baseAmount",       int),
+        ("base_amount",       "baseAmount",       float),
         ("poll_interval_sec", "pollIntervalSec",  float),
         ("tp_refill_min_steps", "tpRefillMinSteps", int),
         ("tp_refill_max_steps", "tpRefillMaxSteps", int),

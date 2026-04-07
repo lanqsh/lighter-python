@@ -5,20 +5,20 @@ from typing import Any, Dict, List, Optional
 
 import lighter
 
-from examples.grid_strategy.auth import AuthTokenManager
-from examples.grid_strategy.config import normalize_side
-from examples.grid_strategy.exchange import fetch_active_orders, collect_trade_evidence
-from examples.grid_strategy.models import (
+from auth import AuthTokenManager
+from config import normalize_side
+from exchange import fetch_active_orders, collect_trade_evidence
+from models import (
     GridSlot, GridState, GridConfig, RuntimeMonitor, TradeEvidence,
     SLOT_IDLE, SLOT_NEW, SLOT_FILLED, SIDE_LONG, SIDE_SHORT,
     position_size_signed,
 )
-from examples.grid_strategy.order_executor import do_place_order, do_cancel_order, record_order_lifecycle, do_market_add_position
-from examples.grid_strategy.price_utils import (
+from order_executor import do_place_order, do_cancel_order, record_order_lifecycle, do_market_add_position
+from price_utils import (
     price_to_wire, size_to_wire,
     split_position_amounts, should_cancel_far_order,
 )
-from examples.grid_strategy.trace import now_iso_ms, append_filled_order_trace_record
+from trace import now_iso_ms, append_filled_order_trace_record
 
 LOGGER = logging.getLogger("smart_grid")
 

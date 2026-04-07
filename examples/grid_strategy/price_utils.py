@@ -1,6 +1,6 @@
 from typing import List, Optional, Tuple
 
-from examples.grid_strategy.models import GridConfig, GridSlot, SIDE_LONG, SLOT_NEW, SLOT_FILLED
+from models import GridConfig, GridSlot, SIDE_LONG, SLOT_NEW, SLOT_FILLED
 
 
 def price_to_wire(price: float, price_decimals: int) -> int:
@@ -40,7 +40,7 @@ def build_entry_prices_for_side(current_price: float, cfg: GridConfig) -> List[f
 
 
 def resolve_effective_base_amount(
-    configured_base_amount: int,
+    configured_base_amount: float,
     current_price: float,
     cfg: GridConfig,
     min_base_amount: float,
@@ -62,7 +62,8 @@ def resolve_effective_base_amount(
         required_by_quote = ceil_div(min_quote_wire * quote_multiplier, price_wire)
         required_base = max(required_base, required_by_quote)
 
-    effective_base = required_base if configured_base_amount <= 0 else max(configured_base_amount, required_base)
+    configured_base_wire = size_to_wire(configured_base_amount, size_decimals) if configured_base_amount > 0 else 0
+    effective_base = required_base if configured_base_wire <= 0 else max(configured_base_wire, required_base)
     return effective_base, required_base, len(entry_prices), min_entry_price
 
 

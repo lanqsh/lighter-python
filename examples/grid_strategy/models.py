@@ -118,7 +118,7 @@ class GridConfig:
     market_id:         int
     levels:            int
     price_step:        float
-    base_amount:       int
+    base_amount:       float
     side:              str
     poll_interval_sec: float
     max_cycles:        int

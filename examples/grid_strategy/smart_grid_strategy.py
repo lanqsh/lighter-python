@@ -17,9 +17,9 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 import lighter
 
-from examples.grid_strategy.auth import AuthTokenManager
-from examples.grid_strategy.config import load_api_key_config, load_grid_config, normalize_side
-from examples.grid_strategy.exchange import (
+from auth import AuthTokenManager
+from config import load_api_key_config, load_grid_config, normalize_side
+from exchange import (
     fetch_account_snapshot,
     fetch_market_detail,
     format_api_exception,
@@ -27,12 +27,12 @@ from examples.grid_strategy.exchange import (
     is_rate_limited_exception,
     is_retryable_exception,
 )
-from examples.grid_strategy.grid_engine import run_one_cycle, seed_startup_position_take_profits
-from examples.grid_strategy.market_utils import resolve_market_id_by_selector
-from examples.grid_strategy.models import GridState, RuntimeMonitor, position_size_signed
-from examples.grid_strategy.order_executor import cancel_all_active_orders_for_market
-from examples.grid_strategy.price_utils import resolve_effective_base_amount
-from examples.grid_strategy.trace import LOGGER, setup_logging, setup_order_trace_file
+from grid_engine import run_one_cycle, seed_startup_position_take_profits
+from market_utils import resolve_market_id_by_selector
+from models import GridState, RuntimeMonitor, position_size_signed
+from order_executor import cancel_all_active_orders_for_market
+from price_utils import resolve_effective_base_amount, size_to_wire
+from trace import LOGGER, setup_logging, setup_order_trace_file
 
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 _BARK_ESCAPING_MAP = {
@@ -205,7 +205,8 @@ async def run_strategy() -> None:
             quote_multiplier=quote_multiplier,
         )
         min_entry_text = f"{min_entry_price:.6f}" if min_entry_price is not None else "n/a"
-        if cfg.base_amount <= 0:
+        configured_base_wire = size_to_wire(cfg.base_amount, size_decimals) if cfg.base_amount > 0 else 0
+        if configured_base_wire <= 0:
             LOGGER.info(
                 "[base_amount] auto=%s required=%s side=%s entry_count=%s min_entry=%s",
                 base_amount,
@@ -214,10 +215,11 @@ async def run_strategy() -> None:
                 entry_count,
                 min_entry_text,
             )
-        elif cfg.base_amount < required_base_amount:
+        elif configured_base_wire < required_base_amount:
             LOGGER.warning(
-                "[base_amount] configured=%s too small for deepest grid price; using auto=%s required=%s side=%s entry_count=%s min_entry=%s",
+                "[base_amount] configured=%s (wire=%s) too small for deepest grid price; using auto=%s required=%s side=%s entry_count=%s min_entry=%s",
                 cfg.base_amount,
+                configured_base_wire,
                 base_amount,
                 required_base_amount,
                 cfg.side,
@@ -226,8 +228,9 @@ async def run_strategy() -> None:
             )
         else:
             LOGGER.info(
-                "[base_amount] configured=%s accepted required=%s side=%s entry_count=%s min_entry=%s",
+                "[base_amount] configured=%s (wire=%s) accepted required=%s side=%s entry_count=%s min_entry=%s",
                 cfg.base_amount,
+                configured_base_wire,
                 required_base_amount,
                 cfg.side,
                 entry_count,

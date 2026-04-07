@@ -5,8 +5,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-from examples.grid_strategy.models import GridSlot, RuntimeMonitor, position_size_signed
-from examples.grid_strategy.price_utils import wire_price_to_float
+from models import GridSlot, RuntimeMonitor, position_size_signed
+from price_utils import wire_price_to_float
 
 LOGGER = logging.getLogger("smart_grid")
 

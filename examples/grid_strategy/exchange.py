@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 import lighter
 from lighter.exceptions import ApiException
 
-from examples.grid_strategy.models import (
+from models import (
     AccountSnapshot, PositionSnapshot, RuntimeMonitor, TradeEvidence,
     format_position_snapshot, position_size_signed,
     RETRYABLE_HTTP_STATUS,

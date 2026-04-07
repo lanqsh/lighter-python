@@ -3,10 +3,10 @@ from typing import Any, Optional
 
 import lighter
 
-from examples.grid_strategy.auth import AuthTokenManager
-from examples.grid_strategy.exchange import fetch_active_orders
-from examples.grid_strategy.models import GridSlot, OrderLifecycle, RuntimeMonitor
-from examples.grid_strategy.trace import now_iso_ms
+from auth import AuthTokenManager
+from exchange import fetch_active_orders
+from models import GridSlot, OrderLifecycle, RuntimeMonitor
+from trace import now_iso_ms
 
 LOGGER = logging.getLogger("smart_grid")
 
