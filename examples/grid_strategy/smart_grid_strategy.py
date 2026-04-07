@@ -87,15 +87,14 @@ async def maybe_send_daily_bark_report(
 
     today_tp = state.today_tp_count if state.today_tp_date == today_sh else 0
     message = (
-        f"lighter Daily Report\n"
-        f"symbol={report_symbol}\n"
-        f"side={grid_side}\n"
-        f"position={signed_position:.6f}\n"
-        f"today_tp={today_tp}\n"
-        f"liq_price={liquidation_price:.4f}\n"
-        f"total_balance={total_asset_value:.4f}\n"
-        f"available_balance={available_balance:.4f}\n"
-        f"price={current_price:.4f}"
+        f"lighter {report_symbol} "
+        f"{grid_side} "
+        f"position={signed_position:.4f} "
+        f"tp={today_tp} "
+        f"liq={liquidation_price:.2f} "
+        f"total={total_asset_value:.2f} "
+        f"available={available_balance:.2f} "
+        f"price={current_price:.2f}"
     )
 
     await asyncio.to_thread(_send_bark_message, bark_server, message)
@@ -188,7 +187,7 @@ async def run_strategy() -> None:
                 leverage=cfg.leverage,
             )
             if err:
-                LOGGER.warning("set leverage failed: %s", err)
+                LOGGER.error("set leverage failed: %s", err)
             else:
                 LOGGER.info("[leverage] updated tx_info=%s response=%s", tx_info, api_response)
         elif cfg.leverage <= 0:

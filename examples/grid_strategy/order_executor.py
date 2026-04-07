@@ -90,7 +90,7 @@ async def do_place_order(
         trigger_price=0,
     )
     if err is not None:
-        LOGGER.warning("[order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+        LOGGER.error("[order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
         record_order_lifecycle(monitor, order_idx, label, "rejected", is_ask, reduce_only, slot=slot, slot_kind=slot_kind, tx_hash=str(tx_hash or ""), error=str(err))
         return False
     LOGGER.info("[order:resp] label=%s coi=%s tx_hash=%s err=None", label, order_idx, tx_hash)
@@ -121,7 +121,10 @@ async def do_cancel_order(
         slot_kind=existing.slot_kind if existing is not None else "",
     )
     _, tx_hash, err = await client.cancel_order(market_index=market_id, order_index=order_idx)
-    LOGGER.info("[cancel:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+    if err is not None:
+        LOGGER.warning("[cancel:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+    else:
+        LOGGER.info("[cancel:resp] label=%s coi=%s tx_hash=%s err=None", label, order_idx, tx_hash)
     record_order_lifecycle(
         monitor, order_idx, label,
         "cancel-confirmed" if err is None else "cancel-failed",
@@ -230,7 +233,7 @@ async def do_market_add_position(
         reduce_only=False,
     )
     if err is not None:
-        LOGGER.warning("[market-order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
+        LOGGER.error("[market-order:resp] label=%s coi=%s tx_hash=%s err=%s", label, order_idx, tx_hash, err)
         record_order_lifecycle(monitor, order_idx, label, "rejected", is_ask, False, tx_hash=str(tx_hash or ""), error=str(err))
         return False
 

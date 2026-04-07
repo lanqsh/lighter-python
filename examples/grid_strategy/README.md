@@ -55,6 +55,16 @@ cp examples/grid_strategy/api_key_config.example.json \
 # 编辑 api_key_config.json，填入真实 baseUrl / accountIndex / privateKeys
 ```
 
+生成密钥：
+  - 将钱包私钥填入system_setup.py,用于生成交易用的密钥,该密钥只有交易权限,没有提币权限
+  - 运行python system_setup.py后,将examples/api_key_config.json的accountIndex和privateKeys填入到grid_strategy/api_key_config.json,
+```python
+BASE_URL = "https://mainnet.zklighter.elliot.ai"
+ETH_PRIVATE_KEY = "YOUR_PRIVATE_KEY"
+API_KEY_INDEX = 0
+NUM_API_KEYS = 1
+```
+
 运行策略：
 
 ```bash

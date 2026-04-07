@@ -1,6 +1,5 @@
 import csv
 import logging
-import sys
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -51,12 +50,7 @@ def setup_logging(market_id: int, side: str) -> Path:
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
-
     LOGGER.addHandler(file_handler)
-    LOGGER.addHandler(console_handler)
     LOGGER.info("[logger] initialized path=%s", log_path)
     return log_path
 

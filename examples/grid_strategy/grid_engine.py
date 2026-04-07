@@ -305,7 +305,7 @@ async def seed_startup_position_take_profits(
             slot=slot, slot_kind="tp",
         )
         if not ok:
-            LOGGER.warning(
+            LOGGER.error(
                 "[startup:position-seed] failed to place tp side=%s tp_price=%.4f amount=%s linked_place=%s",
                 cfg.side, tp_price, tp_amount, synthetic_place_idx,
             )
@@ -423,7 +423,7 @@ async def check_and_add_position(
             await asyncio.to_thread(_send_bark_message_impl, bark_server, message)
         return True
     else:
-        LOGGER.warning(
+        LOGGER.error(
             "[add-position:failed] side=%s threshold=%.6f failed_add=%s coi=%s",
             side, trigger_threshold_amount, add_amount, order_idx,
         )
@@ -541,7 +541,7 @@ async def run_one_cycle(
             "disappeared-from-active", not slot.is_long, False, slot=slot, slot_kind="entry",
         )
         if not evidence_confirms_entry_fill(slot, evidence):
-            LOGGER.warning(
+            LOGGER.error(
                 "[fill:rejected] side=%s entry_price=%.4f coi=%s reason=no trade/position evidence",
                 "LONG" if slot.is_long else "SHORT", slot.place_price, slot.place_order_idx,
             )
@@ -598,7 +598,7 @@ async def run_one_cycle(
             slot.tp_base_amount = base_amount
             slot.status       = SLOT_FILLED
         else:
-            LOGGER.warning(
+            LOGGER.error(
                 "[tp:place-failed] side=%s entry=%.4f tp=%.4f coi=%s",
                 "LONG" if slot.is_long else "SHORT",
                 slot.place_price,
@@ -643,7 +643,7 @@ async def run_one_cycle(
                 slot.status = SLOT_IDLE
                 filled_tp_prices.add(slot.tp_price)
                 continue
-            LOGGER.warning(
+            LOGGER.error(
                 "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
                 "LONG" if slot.is_long else "SHORT", slot.tp_price, slot.tp_order_idx,
             )
@@ -737,7 +737,7 @@ async def run_one_cycle(
             slot.tp_order_idx = tp_idx
             slot.tp_base_amount = base_amount
         else:
-            LOGGER.warning(
+            LOGGER.error(
                 "[tp:refill-failed] side=%s tp_price=%.4f min_steps=%s",
                 "LONG" if slot.is_long else "SHORT",
                 slot.tp_price,
