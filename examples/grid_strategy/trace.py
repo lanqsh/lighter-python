@@ -45,7 +45,7 @@ def setup_logging(market_id: int, side: str) -> Path:
     LOGGER.handlers.clear()
 
     file_handler = RotatingFileHandler(
-        log_path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        log_path, maxBytes=100 * 1024 * 1024, backupCount=10, encoding="utf-8"
     )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)

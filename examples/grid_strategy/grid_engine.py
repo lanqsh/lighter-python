@@ -468,6 +468,41 @@ async def run_one_cycle(
             slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
         )
 
+    # ── Detect manual full-close: position=0 but FILLED slots remain ────────
+    # If the exchange position is 0 but we still track FILLED slots, the user
+    # manually closed all positions externally.  Cancel any lingering orders and
+    # reset every slot to IDLE so the next cycle starts fresh.
+    _current_position = position_size_signed(evidence.position_after)
+    _active_slots_now = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    _has_filled_slots = any(s.status == SLOT_FILLED for s in _active_slots_now)
+    if _current_position == 0.0 and _has_filled_slots:
+        LOGGER.warning(
+            "[manual-close] position=0 but FILLED slots exist — resetting all slots to IDLE "
+            "and cancelling lingering orders (side=%s)",
+            side,
+        )
+        for slot in list(_active_slots_now):
+            # Cancel any remaining entry orders
+            if slot.status == SLOT_NEW and slot.place_order_idx in active_set:
+                await do_cancel_order(
+                    monitor, client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
+                    f"{'LONG' if slot.is_long else 'SHORT'} entry(manual-close-reset) @{slot.place_price:.4f}",
+                )
+            # Cancel any remaining TP orders
+            if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_order_idx in active_set:
+                await do_cancel_order(
+                    monitor, client, cfg.market_id, slot.tp_order_idx, cfg.dry_run,
+                    f"{'LONG' if slot.is_long else 'SHORT'} TP(manual-close-reset) @{slot.tp_price:.4f}",
+                )
+            # Reset slot to IDLE
+            slot.status = SLOT_IDLE
+            slot.place_order_idx = 0
+            slot.place_base_amount = 0
+            slot.tp_order_idx = 0
+            slot.tp_base_amount = 0
+        LOGGER.info("[manual-close] all slots reset to IDLE, skipping this cycle")
+        return
+
     # ── Check and add position if needed ──────────────────────────────────
     await check_and_add_position(
         monitor=monitor, client=client, state=state, cfg=cfg,
@@ -750,10 +785,10 @@ async def run_one_cycle(
             place_price = aligned - cfg.price_step * i
             if place_price <= 0 or place_price >= current_price:
                 continue
-            if place_price in filled_tp_prices:
+            if place_price + cfg.price_step in filled_tp_prices:
                 LOGGER.info(
-                    "[entry:skip-tp-reopen] side=long place_price=%.4f is a tp level that just fired this cycle",
-                    place_price,
+                    "[entry:skip-tp-reopen] side=long place_price=%.4f tp=%.4f is a tp level that just fired this cycle",
+                    place_price, place_price + cfg.price_step,
                 )
                 continue
             k    = GridState.price_key(place_price)
@@ -779,10 +814,10 @@ async def run_one_cycle(
             place_price = aligned + cfg.price_step * i
             if place_price <= current_price:
                 continue
-            if place_price in filled_tp_prices:
+            if place_price - cfg.price_step in filled_tp_prices:
                 LOGGER.info(
-                    "[entry:skip-tp-reopen] side=short place_price=%.4f is a tp level that just fired this cycle",
-                    place_price,
+                    "[entry:skip-tp-reopen] side=short place_price=%.4f tp=%.4f is a tp level that just fired this cycle",
+                    place_price, place_price - cfg.price_step,
                 )
                 continue
             k    = GridState.price_key(place_price)
