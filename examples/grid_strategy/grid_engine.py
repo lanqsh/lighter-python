@@ -2,6 +2,9 @@ import asyncio
 import datetime as _dt
 import logging
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 import lighter
 
@@ -52,7 +55,7 @@ def _send_bark_message_impl(bark_server: str, message: str) -> None:
 
 
 def get_order_base_amount(order: Any) -> int:
-    for field_name in ("initial_base_amount", "base_amount", "amount", "size"):
+    for field_name in ("base_size", "initial_base_amount", "base_amount", "amount", "size"):
         value = getattr(order, field_name, None)
         if value is None:
             continue
@@ -104,6 +107,7 @@ async def ensure_tp_capacity_for_new_order(
     current_price: float,
     desired_tp_price: float,
     reason: str,
+    force_replace: bool = False,
 ) -> bool:
     current_tp_count = count_side_tp_orders(state, side)
     if current_tp_count < cfg.levels:
@@ -134,8 +138,21 @@ async def ensure_tp_capacity_for_new_order(
 
     desired_distance = abs(desired_tp_price - current_price)
     if farthest_distance <= desired_distance:
+        if not force_replace:
+            LOGGER.info(
+                "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
+                side,
+                cfg.levels,
+                current_tp_count,
+                desired_tp_price,
+                desired_distance,
+                farthest_slot.tp_price,
+                farthest_distance,
+                reason,
+            )
+            return False
         LOGGER.info(
-            "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
+            "[tp:replace-cap-force] side=%s levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
             side,
             cfg.levels,
             current_tp_count,
@@ -145,7 +162,6 @@ async def ensure_tp_capacity_for_new_order(
             farthest_distance,
             reason,
         )
-        return False
 
     replaced_idx = farthest_slot.tp_order_idx
     await do_cancel_order(
@@ -692,8 +708,10 @@ async def run_one_cycle(
         slot.status = SLOT_IDLE
         filled_tp_prices.add(slot.tp_price)
         state.success_count += 1
-        _today = _dt.date.today().isoformat()
+        _today = _dt.datetime.now(_SHANGHAI_TZ).date().isoformat()
         if state.today_tp_date != _today:
+            state.prev_day_tp_count = state.today_tp_count
+            state.prev_day_tp_date  = state.today_tp_date
             state.today_tp_count = 0
             state.today_tp_date  = _today
         state.today_tp_count += 1
@@ -758,6 +776,7 @@ async def run_one_cycle(
             current_price=current_price,
             desired_tp_price=slot.tp_price,
             reason=f"tp-refill@{slot.tp_price:.4f}",
+            force_replace=True,
         ):
             continue
         tp_idx = state.alloc_idx()

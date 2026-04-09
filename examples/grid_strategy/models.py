@@ -87,9 +87,11 @@ class GridState:
         self.long_slots:     Dict[str, GridSlot] = {}
         self.short_slots:    Dict[str, GridSlot] = {}
         self.next_order_idx: int = start_order_index
-        self.success_count:  int = 0
-        self.today_tp_count: int = 0
-        self.today_tp_date:  str = ""
+        self.success_count:   int = 0
+        self.today_tp_count:  int = 0
+        self.today_tp_date:   str = ""
+        self.prev_day_tp_count: int = 0
+        self.prev_day_tp_date:  str = ""
 
     @staticmethod
     def price_key(price: float) -> str:

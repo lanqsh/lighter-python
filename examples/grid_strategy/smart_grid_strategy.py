@@ -86,6 +86,8 @@ async def maybe_send_daily_bark_report(
     report_symbol = monitor.last_position.symbol if monitor.last_position is not None and monitor.last_position.symbol else market_symbol
 
     today_tp = state.today_tp_count if state.today_tp_date == today_sh else 0
+    if state.prev_day_tp_date == (now_sh.date() - _dt.timedelta(days=1)).isoformat():
+        today_tp = state.prev_day_tp_count
     message = (
         f"lighter {report_symbol} "
         f"{grid_side} "
@@ -385,7 +387,7 @@ async def run_strategy() -> None:
             else:
                 _in_rate_limit = False
 
-            today = _dt.date.today().isoformat()
+            today = _dt.datetime.now(SHANGHAI_TZ).date().isoformat()
             today_tp = state.today_tp_count if state.today_tp_date == today else 0
             LOGGER.info(
                 "[tp:summary] cycle=%s total_tp=%s today_tp=%s(%s)",
