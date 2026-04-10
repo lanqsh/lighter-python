@@ -44,13 +44,14 @@ def record_order_lifecycle(
         tx_hash=tx_hash,
         error=error,
     )
-    LOGGER.info(
-        "[coi] %s | %s | %s/%s | e=%.4f tp=%.4f | ask=%s ro=%s | tx=%s | err=%s | %s",
-        client_order_index, event,
-        effective_slot_side, effective_slot_kind,
-        effective_entry_price, effective_tp_price,
-        is_ask, reduce_only, tx_hash, error, label,
-    )
+    if prev is None or prev.event != event:
+        LOGGER.info(
+            "[coi] %s | %s | %s/%s | e=%.4f tp=%.4f | ask=%s ro=%s | tx=%s | err=%s | %s",
+            client_order_index, event,
+            effective_slot_side, effective_slot_kind,
+            effective_entry_price, effective_tp_price,
+            is_ask, reduce_only, tx_hash, error, label,
+        )
 
 
 async def do_place_order(

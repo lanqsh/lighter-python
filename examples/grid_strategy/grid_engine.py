@@ -154,7 +154,7 @@ async def ensure_tp_capacity_for_new_order(
     if farthest_distance <= desired_distance:
         # The desired TP is no closer (or is farther) than every existing TP.
         # Evicting to make room would downgrade coverage; skip instead.
-        LOGGER.info(
+        LOGGER.debug(
             "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s "
             "desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
             side,
@@ -396,7 +396,7 @@ async def check_and_add_position(
     # For SHORT side: we want current_position to be <= -target position (negative)
     if side == SIDE_LONG:
         if current_position >= trigger_threshold_amount:
-            LOGGER.info(
+            LOGGER.debug(
                 "[add-position] skip LONG current=%.6f threshold=%.6f (levels=%s base_amount=%s)",
                 current_position, trigger_threshold_amount, cfg.levels, base_amount,
             )
@@ -404,7 +404,7 @@ async def check_and_add_position(
         add_amount_float = grid_total_amount
     else:  # SIDE_SHORT
         if current_position <= -trigger_threshold_amount:
-            LOGGER.info(
+            LOGGER.debug(
                 "[add-position] skip SHORT current=%.6f threshold=-%.6f (levels=%s base_amount=%s)",
                 current_position, trigger_threshold_amount, cfg.levels, base_amount,
             )

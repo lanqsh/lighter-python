@@ -238,7 +238,12 @@ async def collect_trade_evidence(
     evidence = TradeEvidence(position_before=monitor.last_position)
     snapshot = await fetch_position_snapshot(account_api, account_index, market_id)
     evidence.position_after = snapshot
-    if format_position_snapshot(snapshot) != format_position_snapshot(monitor.last_position):
+    def _position_key(s):
+        if s is None:
+            return None
+        return (s.symbol, s.market_id, s.sign, s.position, s.avg_entry_price,
+                s.open_order_count, s.pending_order_count)
+    if _position_key(snapshot) != _position_key(monitor.last_position):
         LOGGER.info(
             "[position:change] before=(%s) after=(%s)",
             format_position_snapshot(monitor.last_position),
