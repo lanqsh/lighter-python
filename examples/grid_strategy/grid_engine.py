@@ -108,10 +108,24 @@ async def ensure_tp_capacity_for_new_order(
     desired_tp_price: float,
     reason: str,
     force_replace: bool = False,
-) -> bool:
+) -> Optional[str]:
+    """
+    Ensure there is room for one more TP order.
+
+    Returns:
+      None   – capacity cannot be made available (caller should skip).
+      ""     – capacity was already available (no eviction needed).
+      <key>  – the GridState.price_key of the slot whose TP was evicted;
+               caller should record it so the same slot is not re-processed
+               later in the same refill loop iteration.
+
+    The `force_replace` parameter is intentionally ignored.  Forcing an
+    eviction of a closer-to-price TP in favour of a farther one causes
+    endless cancel/replace oscillation when FILLED slots > TP cap.
+    """
     current_tp_count = count_side_tp_orders(state, side)
     if current_tp_count < cfg.levels:
-        return True
+        return ""
 
     slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     farthest_slot: Optional[GridSlot] = None
@@ -134,25 +148,15 @@ async def ensure_tp_capacity_for_new_order(
             desired_tp_price,
             reason,
         )
-        return False
+        return None
 
     desired_distance = abs(desired_tp_price - current_price)
     if farthest_distance <= desired_distance:
-        if not force_replace:
-            LOGGER.info(
-                "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
-                side,
-                cfg.levels,
-                current_tp_count,
-                desired_tp_price,
-                desired_distance,
-                farthest_slot.tp_price,
-                farthest_distance,
-                reason,
-            )
-            return False
+        # The desired TP is no closer (or is farther) than every existing TP.
+        # Evicting to make room would downgrade coverage; skip instead.
         LOGGER.info(
-            "[tp:replace-cap-force] side=%s levels=%s current_tp=%s desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
+            "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s "
+            "desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
             side,
             cfg.levels,
             current_tp_count,
@@ -162,8 +166,10 @@ async def ensure_tp_capacity_for_new_order(
             farthest_distance,
             reason,
         )
+        return None
 
     replaced_idx = farthest_slot.tp_order_idx
+    evicted_key = GridState.price_key(farthest_slot.place_price)
     await do_cancel_order(
         monitor,
         client,
@@ -183,7 +189,7 @@ async def ensure_tp_capacity_for_new_order(
             desired_tp_price,
             reason,
         )
-        return False
+        return None
 
     farthest_slot.tp_order_idx = 0
     farthest_slot.tp_base_amount = 0
@@ -197,7 +203,7 @@ async def ensure_tp_capacity_for_new_order(
         desired_tp_price,
         reason,
     )
-    return True
+    return evicted_key
 
 
 def summarize_active_slots(
@@ -370,6 +376,22 @@ async def check_and_add_position(
     trigger_threshold_amount = grid_total_amount + base_amount_float
     current_position = position_size_signed(evidence.position_after)
 
+    # Guard: if position is in the wrong direction (short in LONG strategy or
+    # long in SHORT strategy), skip adding position entirely — the wrong-direction
+    # position must be closed first (handled in run_one_cycle).
+    if side == SIDE_LONG and current_position < 0:
+        LOGGER.warning(
+            "[add-position:skip] LONG strategy has short position=%.6f — skip add, wrong direction",
+            current_position,
+        )
+        return False
+    if side == SIDE_SHORT and current_position > 0:
+        LOGGER.warning(
+            "[add-position:skip] SHORT strategy has long position=%.6f — skip add, wrong direction",
+            current_position,
+        )
+        return False
+
     # For LONG side: we want current_position to be >= target position (positive)
     # For SHORT side: we want current_position to be <= -target position (negative)
     if side == SIDE_LONG:
@@ -484,31 +506,46 @@ async def run_one_cycle(
             slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
         )
 
-    # ── Detect manual full-close: position=0 but FILLED slots remain ────────
-    # If the exchange position is 0 but we still track FILLED slots, the user
-    # manually closed all positions externally.  Cancel any lingering orders and
-    # reset every slot to IDLE so the next cycle starts fresh.
+    # ── Detect manual full-close OR wrong-direction position ────────────────
+    # Case A: position == 0 but FILLED slots exist → user manually closed all.
+    # Case B: position is in the wrong direction (short in LONG strategy, or
+    #         long in SHORT strategy) → a reduce_only TP over-sold/over-bought,
+    #         creating an unintended counter position.
+    # In both cases: cancel all lingering orders, reset every slot to IDLE.
+    # For Case B also place a market order to close the wrong-direction position.
     _current_position = position_size_signed(evidence.position_after)
     _active_slots_now = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     _has_filled_slots = any(s.status == SLOT_FILLED for s in _active_slots_now)
-    if _current_position == 0.0 and _has_filled_slots:
-        LOGGER.warning(
-            "[manual-close] position=0 but FILLED slots exist — resetting all slots to IDLE "
-            "and cancelling lingering orders (side=%s)",
-            side,
-        )
+    _wrong_direction = (
+        (side == SIDE_LONG  and _current_position < 0) or
+        (side == SIDE_SHORT and _current_position > 0)
+    )
+    if (_current_position == 0.0 and _has_filled_slots) or _wrong_direction:
+        if _wrong_direction:
+            LOGGER.warning(
+                "[position:wrong-direction] side=%s position=%.6f — "
+                "unexpected counter-direction position detected; cancelling all orders, "
+                "resetting slots, and closing wrong-direction position",
+                side, _current_position,
+            )
+        else:
+            LOGGER.warning(
+                "[manual-close] position=0 but FILLED slots exist — resetting all slots to IDLE "
+                "and cancelling lingering orders (side=%s)",
+                side,
+            )
         for slot in list(_active_slots_now):
             # Cancel any remaining entry orders
             if slot.status == SLOT_NEW and slot.place_order_idx in active_set:
                 await do_cancel_order(
                     monitor, client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
-                    f"{'LONG' if slot.is_long else 'SHORT'} entry(manual-close-reset) @{slot.place_price:.4f}",
+                    f"{'LONG' if slot.is_long else 'SHORT'} entry(reset) @{slot.place_price:.4f}",
                 )
             # Cancel any remaining TP orders
             if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_order_idx in active_set:
                 await do_cancel_order(
                     monitor, client, cfg.market_id, slot.tp_order_idx, cfg.dry_run,
-                    f"{'LONG' if slot.is_long else 'SHORT'} TP(manual-close-reset) @{slot.tp_price:.4f}",
+                    f"{'LONG' if slot.is_long else 'SHORT'} TP(reset) @{slot.tp_price:.4f}",
                 )
             # Reset slot to IDLE
             slot.status = SLOT_IDLE
@@ -516,7 +553,28 @@ async def run_one_cycle(
             slot.place_base_amount = 0
             slot.tp_order_idx = 0
             slot.tp_base_amount = 0
-        LOGGER.info("[manual-close] all slots reset to IDLE, skipping this cycle")
+        # For wrong-direction position: place a market order to close it immediately
+        if _wrong_direction:
+            close_amount = size_to_wire(abs(_current_position), size_decimals)
+            if close_amount > 0:
+                close_idx = state.alloc_idx()
+                # LONG strategy has a short → buy to close; SHORT strategy has a long → sell to close
+                is_ask_to_close = _current_position > 0
+                close_label = (
+                    f"{'SELL' if is_ask_to_close else 'BUY'} close-wrong-direction "
+                    f"position={_current_position:.6f} @market"
+                )
+                LOGGER.warning(
+                    "[position:wrong-direction] placing market order to close: %s coi=%s",
+                    close_label, close_idx,
+                )
+                await do_market_add_position(
+                    monitor=monitor, client=client, market_id=cfg.market_id,
+                    order_idx=close_idx, base_amount=close_amount,
+                    is_ask=is_ask_to_close, dry_run=cfg.dry_run,
+                    label=close_label,
+                )
+        LOGGER.info("[reset] all slots reset to IDLE, skipping this cycle (side=%s)", side)
         return
 
     # ── Check and add position if needed ──────────────────────────────────
@@ -625,7 +683,7 @@ async def run_one_cycle(
         tp_idx  = state.alloc_idx()
         tp_wire = price_to_wire(slot.tp_price, price_decimals)
         label   = f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}"
-        if not await ensure_tp_capacity_for_new_order(
+        if await ensure_tp_capacity_for_new_order(
             monitor=monitor,
             client=client,
             state=state,
@@ -635,7 +693,7 @@ async def run_one_cycle(
             current_price=current_price,
             desired_tp_price=slot.tp_price,
             reason=f"entry-fill@{slot.place_price:.4f}",
-        ):
+        ) is None:
             slot.tp_order_idx = 0
             slot.status = SLOT_FILLED
             continue
@@ -741,12 +799,19 @@ async def run_one_cycle(
         )
 
     # ── Refill missing TP only when TP level is far enough from current price ─
+    # Track slots whose TPs were evicted this cycle to avoid re-processing them
+    # in the same loop (which would trigger infinite within-cycle oscillation).
+    evicted_tp_slot_keys: set = set()
     all_slots = list(active_slots)
     refill_candidates = sorted(
         all_slots,
         key=lambda slot: abs(slot.tp_price - current_price),
     )
     for slot in refill_candidates:
+        # Skip slots whose TPs were just cleared this cycle by an earlier refill
+        slot_key = GridState.price_key(slot.place_price)
+        if slot_key in evicted_tp_slot_keys:
+            continue
         active_tp_count = count_side_tp_orders(state, side)
         signed_position = position_size_signed(evidence.position_after)
         has_side_position = signed_position > 0 if side == SIDE_LONG else signed_position < 0
@@ -766,7 +831,7 @@ async def run_one_cycle(
                 slot.tp_price,
                 slot.place_price,
             )
-        if not await ensure_tp_capacity_for_new_order(
+        evicted_key = await ensure_tp_capacity_for_new_order(
             monitor=monitor,
             client=client,
             state=state,
@@ -776,9 +841,16 @@ async def run_one_cycle(
             current_price=current_price,
             desired_tp_price=slot.tp_price,
             reason=f"tp-refill@{slot.tp_price:.4f}",
-            force_replace=True,
-        ):
+            # Do NOT force-replace: if all existing TPs are closer to current
+            # price than the desired TP, skip this refill.  Forcing would evict
+            # a closer (more-likely-to-execute) TP in favour of a farther one,
+            # causing endless cancel/replace oscillation when there are more
+            # FILLED slots than the TP cap.
+        )
+        if evicted_key is None:
             continue
+        if evicted_key != "":
+            evicted_tp_slot_keys.add(evicted_key)
         tp_idx = state.alloc_idx()
         label = f"{'LONG' if slot.is_long else 'SHORT'} TP(refill) @{slot.tp_price:.4f}"
         ok = await do_place_order(
@@ -804,10 +876,10 @@ async def run_one_cycle(
             place_price = aligned - cfg.price_step * i
             if place_price <= 0 or place_price >= current_price:
                 continue
-            if place_price + cfg.price_step in filled_tp_prices:
+            if place_price in filled_tp_prices or place_price + cfg.price_step in filled_tp_prices:
                 LOGGER.info(
-                    "[entry:skip-tp-reopen] side=long place_price=%.4f tp=%.4f is a tp level that just fired this cycle",
-                    place_price, place_price + cfg.price_step,
+                    "[entry:skip-tp-reopen] side=long place_price=%.4f tp=%.4f skipped (fired_tp_prices=%s)",
+                    place_price, place_price + cfg.price_step, filled_tp_prices,
                 )
                 continue
             k    = GridState.price_key(place_price)
@@ -833,10 +905,10 @@ async def run_one_cycle(
             place_price = aligned + cfg.price_step * i
             if place_price <= current_price:
                 continue
-            if place_price - cfg.price_step in filled_tp_prices:
+            if place_price in filled_tp_prices or place_price - cfg.price_step in filled_tp_prices:
                 LOGGER.info(
-                    "[entry:skip-tp-reopen] side=short place_price=%.4f tp=%.4f is a tp level that just fired this cycle",
-                    place_price, place_price - cfg.price_step,
+                    "[entry:skip-tp-reopen] side=short place_price=%.4f tp=%.4f skipped (fired_tp_prices=%s)",
+                    place_price, place_price - cfg.price_step, filled_tp_prices,
                 )
                 continue
             k    = GridState.price_key(place_price)
