@@ -598,15 +598,20 @@ async def run_one_cycle(
                 await asyncio.to_thread(_send_bark_message_impl, bark_server, _liq_msg)
 
     # ── Position / filled-slot count mismatch check ──────────────────────────
+    # Only warn when actual position is LESS than expected: that means slots
+    # think they have open positions but the exchange shows they don't.
+    # Actual > expected is normal because add-position top-ups push the total
+    # above levels * base_amount intentionally.
     _check_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     _filled_slot_count = sum(1 for s in _check_slots if s.status == SLOT_FILLED)
     _actual_pos_wire = size_to_wire(abs(position_size_signed(evidence.position_after)), size_decimals)
     _expected_pos_wire = _filled_slot_count * base_amount
-    if _expected_pos_wire > 0 and abs(_actual_pos_wire - _expected_pos_wire) > base_amount:
+    if _expected_pos_wire > 0 and _actual_pos_wire < _expected_pos_wire - base_amount:
         LOGGER.warning(
-            "[risk:position-mismatch] side=%s filled_slots=%s expected_wire=%s actual_wire=%s diff=%s",
+            "[risk:position-mismatch] side=%s filled_slots=%s expected_wire=%s actual_wire=%s diff=%s"
+            " (actual position smaller than slots suggest)",
             side, _filled_slot_count, _expected_pos_wire, _actual_pos_wire,
-            abs(_actual_pos_wire - _expected_pos_wire),
+            _expected_pos_wire - _actual_pos_wire,
         )
 
     # ── Check and add position if needed ──────────────────────────────────
