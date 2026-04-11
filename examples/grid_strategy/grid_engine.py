@@ -577,6 +577,38 @@ async def run_one_cycle(
         LOGGER.info("[reset] all slots reset to IDLE, skipping this cycle (side=%s)", side)
         return
 
+    # ── Liquidation proximity check ─────────────────────────────────────────
+    _liq_price = evidence.position_after.liquidation_price if evidence.position_after else 0.0
+    if _liq_price > 0:
+        _liq_dist_pct = abs(current_price - _liq_price) / _liq_price * 100
+        if _liq_dist_pct < 5.0:
+            LOGGER.warning(
+                "[risk:liquidation-near] side=%s current_price=%.4f liq_price=%.4f distance=%.2f%%",
+                side, current_price, _liq_price, _liq_dist_pct,
+            )
+            _today = _dt.datetime.now(_SHANGHAI_TZ).date().isoformat()
+            if bark_server and monitor.last_liq_bark_date != _today:
+                monitor.last_liq_bark_date = _today
+                _liq_msg = (
+                    f"[lighter] LIQUIDATION RISK\n"
+                    f"side={side} price={current_price:.4f}\n"
+                    f"liq={_liq_price:.4f} dist={_liq_dist_pct:.2f}%\n"
+                    f"symbol={cfg.market_symbol}"
+                )
+                await asyncio.to_thread(_send_bark_message_impl, bark_server, _liq_msg)
+
+    # ── Position / filled-slot count mismatch check ──────────────────────────
+    _check_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
+    _filled_slot_count = sum(1 for s in _check_slots if s.status == SLOT_FILLED)
+    _actual_pos_wire = size_to_wire(abs(position_size_signed(evidence.position_after)), size_decimals)
+    _expected_pos_wire = _filled_slot_count * base_amount
+    if _expected_pos_wire > 0 and abs(_actual_pos_wire - _expected_pos_wire) > base_amount:
+        LOGGER.warning(
+            "[risk:position-mismatch] side=%s filled_slots=%s expected_wire=%s actual_wire=%s diff=%s",
+            side, _filled_slot_count, _expected_pos_wire, _actual_pos_wire,
+            abs(_actual_pos_wire - _expected_pos_wire),
+        )
+
     # ── Check and add position if needed ──────────────────────────────────
     await check_and_add_position(
         monitor=monitor, client=client, state=state, cfg=cfg,
@@ -706,6 +738,9 @@ async def run_one_cycle(
             slot.tp_order_idx = tp_idx
             slot.tp_base_amount = base_amount
             slot.status       = SLOT_FILLED
+            # Mark as present in active_set so TP-fill detection later in this
+            # same cycle does not mistake it for a disappeared (filled) order.
+            active_set[tp_idx] = True
         else:
             LOGGER.error(
                 "[tp:place-failed] side=%s entry=%.4f tp=%.4f coi=%s",
@@ -753,7 +788,8 @@ async def run_one_cycle(
                 filled_tp_prices.add(slot.tp_price)
                 continue
             LOGGER.error(
-                "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence",
+                "[tp:rejected] side=%s tp_price=%.4f coi=%s reason=no trade/position evidence"
+                " — resetting tp_order_idx so refill can recover next cycle",
                 "LONG" if slot.is_long else "SHORT", slot.tp_price, slot.tp_order_idx,
             )
             record_order_lifecycle(
@@ -761,6 +797,10 @@ async def run_one_cycle(
                 f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
                 "disappeared-without-fill-evidence", slot.is_long, True, slot=slot, slot_kind="tp",
             )
+            # Reset so should_refill_tp_for_slot can re-queue this slot next cycle
+            # rather than leaving it stuck with a stale tp_order_idx forever.
+            slot.tp_order_idx = 0
+            slot.tp_base_amount = 0
             continue
 
         slot.status = SLOT_IDLE
@@ -862,6 +902,9 @@ async def run_one_cycle(
         if ok:
             slot.tp_order_idx = tp_idx
             slot.tp_base_amount = base_amount
+            # Same as entry-fill path: prevent same-cycle TP-fill detection
+            # from treating this newly placed order as disappeared.
+            active_set[tp_idx] = True
         else:
             LOGGER.error(
                 "[tp:refill-failed] side=%s tp_price=%.4f min_steps=%s",

@@ -73,6 +73,7 @@ class RuntimeMonitor:
     order_lifecycles:        Dict[int, OrderLifecycle] = field(default_factory=dict)
     order_submit_times:      Dict[int, str] = field(default_factory=dict)
     last_add_position_time:  float = 0.0  # Timestamp of last add-position order
+    last_liq_bark_date:      str   = ""    # Date (YYYY-MM-DD) of last liquidation-risk bark
 
 
 @dataclass
