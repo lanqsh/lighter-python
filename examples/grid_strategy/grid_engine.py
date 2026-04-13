@@ -813,9 +813,6 @@ async def run_one_cycle(
         state.success_count += 1
         _today = _dt.datetime.now(_SHANGHAI_TZ).date().isoformat()
         if state.today_tp_date != _today:
-            state.prev_day_tp_count = state.today_tp_count
-            state.prev_day_tp_date  = state.today_tp_date
-            state.today_tp_count = 0
             state.today_tp_date  = _today
         state.today_tp_count += 1
 
