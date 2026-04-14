@@ -306,6 +306,13 @@ async def run_strategy() -> None:
             try:
                 market_detail = await fetch_market_detail(order_api, cfg.market_id)
             except Exception as e:
+                if is_auth_error_exception(e):
+                    LOGGER.warning(
+                        "[cycle:auth-error] cycle=%s fetch_market_detail invalid signature — force-refreshing token",
+                        cycle,
+                    )
+                    await auth_mgr.force_refresh()
+                    continue
                 if is_retryable_exception(e):
                     if is_rate_limited_exception(e):
                         if not _in_rate_limit:
