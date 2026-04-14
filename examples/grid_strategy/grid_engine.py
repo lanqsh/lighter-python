@@ -152,8 +152,6 @@ async def ensure_tp_capacity_for_new_order(
 
     desired_distance = abs(desired_tp_price - current_price)
     if farthest_distance <= desired_distance:
-        # The desired TP is no closer (or is farther) than every existing TP.
-        # Evicting to make room would downgrade coverage; skip instead.
         LOGGER.debug(
             "[tp:replace-cap-skip] side=%s reason=new-not-closer levels=%s current_tp=%s "
             "desired_tp=%.4f desired_dist=%.4f far_tp=%.4f far_dist=%.4f why=%s",
@@ -287,8 +285,6 @@ async def seed_startup_position_take_profits(
         snapshot.avg_entry_price if snapshot is not None else 0.0,
     )
 
-    # Keep startup-seeded TP away from the nearest grid TP level to avoid
-    # colliding with TP orders that will be created by fresh place fills.
     startup_tp_offset_steps = 2
 
     for idx, tp_amount in enumerate(tp_amounts, start=1):
@@ -376,9 +372,6 @@ async def check_and_add_position(
     trigger_threshold_amount = grid_total_amount + base_amount_float
     current_position = position_size_signed(evidence.position_after)
 
-    # Guard: if position is in the wrong direction (short in LONG strategy or
-    # long in SHORT strategy), skip adding position entirely — the wrong-direction
-    # position must be closed first (handled in run_one_cycle).
     if side == SIDE_LONG and current_position < 0:
         LOGGER.warning(
             "[add-position:skip] LONG strategy has short position=%.6f — skip add, wrong direction",
@@ -392,8 +385,6 @@ async def check_and_add_position(
         )
         return False
 
-    # For LONG side: we want current_position to be >= target position (positive)
-    # For SHORT side: we want current_position to be <= -target position (negative)
     if side == SIDE_LONG:
         if current_position >= trigger_threshold_amount:
             LOGGER.debug(
@@ -402,7 +393,7 @@ async def check_and_add_position(
             )
             return False
         add_amount_float = grid_total_amount
-    else:  # SIDE_SHORT
+    else:
         if current_position <= -trigger_threshold_amount:
             LOGGER.debug(
                 "[add-position] skip SHORT current=%.6f threshold=-%.6f (levels=%s base_amount=%s)",
@@ -411,12 +402,10 @@ async def check_and_add_position(
             return False
         add_amount_float = grid_total_amount
 
-    # Ensure add_amount is positive and at least one wire unit
     add_amount = size_to_wire(abs(add_amount_float), size_decimals)
     if add_amount <= 0:
         return False
 
-    # Check 5-minute interval
     now = time.time()
     if now - monitor.last_add_position_time < 300:
         time_since_last = now - monitor.last_add_position_time
@@ -427,7 +416,7 @@ async def check_and_add_position(
         return False
 
     order_idx = state.alloc_idx()
-    is_ask = side == SIDE_SHORT  # For LONG, is_ask=False; for SHORT, is_ask=True
+    is_ask = side == SIDE_SHORT
     label = f"{side.upper()} market-add-position threshold={trigger_threshold_amount:.6f} add={add_amount_float:.6f}"
 
     LOGGER.info(
@@ -447,7 +436,6 @@ async def check_and_add_position(
             "[add-position:success] side=%s threshold=%.6f added=%.6f(%s wire) coi=%s",
             side, trigger_threshold_amount, abs(add_amount_float), add_amount, order_idx,
         )
-        # Send bark message
         message = (
             f"[lighter] Market Add Position\n"
             f"side={side.upper()}\n"
@@ -506,13 +494,6 @@ async def run_one_cycle(
             slot_kind=lifecycle.slot_kind if lifecycle is not None else "",
         )
 
-    # ── Detect manual full-close OR wrong-direction position ────────────────
-    # Case A: position == 0 but FILLED slots exist → user manually closed all.
-    # Case B: position is in the wrong direction (short in LONG strategy, or
-    #         long in SHORT strategy) → a reduce_only TP over-sold/over-bought,
-    #         creating an unintended counter position.
-    # In both cases: cancel all lingering orders, reset every slot to IDLE.
-    # For Case B also place a market order to close the wrong-direction position.
     _current_position = position_size_signed(evidence.position_after)
     _active_slots_now = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     _has_filled_slots = any(s.status == SLOT_FILLED for s in _active_slots_now)
@@ -535,30 +516,25 @@ async def run_one_cycle(
                 side,
             )
         for slot in list(_active_slots_now):
-            # Cancel any remaining entry orders
             if slot.status == SLOT_NEW and slot.place_order_idx in active_set:
                 await do_cancel_order(
                     monitor, client, cfg.market_id, slot.place_order_idx, cfg.dry_run,
                     f"{'LONG' if slot.is_long else 'SHORT'} entry(reset) @{slot.place_price:.4f}",
                 )
-            # Cancel any remaining TP orders
             if slot.status == SLOT_FILLED and slot.tp_order_idx > 0 and slot.tp_order_idx in active_set:
                 await do_cancel_order(
                     monitor, client, cfg.market_id, slot.tp_order_idx, cfg.dry_run,
                     f"{'LONG' if slot.is_long else 'SHORT'} TP(reset) @{slot.tp_price:.4f}",
                 )
-            # Reset slot to IDLE
             slot.status = SLOT_IDLE
             slot.place_order_idx = 0
             slot.place_base_amount = 0
             slot.tp_order_idx = 0
             slot.tp_base_amount = 0
-        # For wrong-direction position: place a market order to close it immediately
         if _wrong_direction:
             close_amount = size_to_wire(abs(_current_position), size_decimals)
             if close_amount > 0:
                 close_idx = state.alloc_idx()
-                # LONG strategy has a short → buy to close; SHORT strategy has a long → sell to close
                 is_ask_to_close = _current_position > 0
                 close_label = (
                     f"{'SELL' if is_ask_to_close else 'BUY'} close-wrong-direction "
@@ -577,7 +553,6 @@ async def run_one_cycle(
         LOGGER.info("[reset] all slots reset to IDLE, skipping this cycle (side=%s)", side)
         return
 
-    # ── Liquidation proximity check ─────────────────────────────────────────
     _liq_price = evidence.position_after.liquidation_price if evidence.position_after else 0.0
     if _liq_price > 0:
         _liq_dist_pct = abs(current_price - _liq_price) / _liq_price * 100
@@ -597,11 +572,6 @@ async def run_one_cycle(
                 )
                 await asyncio.to_thread(_send_bark_message_impl, bark_server, _liq_msg)
 
-    # ── Position / filled-slot count mismatch check ──────────────────────────
-    # Only warn when actual position is LESS than expected: that means slots
-    # think they have open positions but the exchange shows they don't.
-    # Actual > expected is normal because add-position top-ups push the total
-    # above levels * base_amount intentionally.
     _check_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     _filled_slot_count = sum(1 for s in _check_slots if s.status == SLOT_FILLED)
     _actual_pos_wire = size_to_wire(abs(position_size_signed(evidence.position_after)), size_decimals)
@@ -614,7 +584,6 @@ async def run_one_cycle(
             _expected_pos_wire - _actual_pos_wire,
         )
 
-    # ── Check and add position if needed ──────────────────────────────────
     await check_and_add_position(
         monitor=monitor, client=client, state=state, cfg=cfg,
         evidence=evidence, side=side, base_amount=base_amount, bark_server=bark_server, size_decimals=size_decimals,
@@ -623,7 +592,6 @@ async def run_one_cycle(
     aligned       = (int(current_price / cfg.price_step)) * cfg.price_step
     far_threshold = cfg.price_step * cfg.levels * 2
 
-    # ── Cancel orders that have drifted too far from current price ──────────
     active_slots = state.long_slots.values() if side == SIDE_LONG else state.short_slots.values()
     for slot in list(active_slots):
         should_cancel, order_kind, cancel_order_idx, cancel_price = should_cancel_far_order(
@@ -668,7 +636,6 @@ async def run_one_cycle(
             slot.tp_order_idx = 0
             slot.tp_base_amount = 0
 
-    # ── Detect entry fills ───────────────────────────────────────────────────
     all_slots = list(active_slots)
     for slot in all_slots:
         if slot.status != SLOT_NEW:
@@ -743,8 +710,6 @@ async def run_one_cycle(
             slot.tp_order_idx = tp_idx
             slot.tp_base_amount = base_amount
             slot.status       = SLOT_FILLED
-            # Mark as present in active_set so TP-fill detection later in this
-            # same cycle does not mistake it for a disappeared (filled) order.
             active_set[tp_idx] = True
         else:
             LOGGER.error(
@@ -758,10 +723,6 @@ async def run_one_cycle(
             slot.tp_base_amount = 0
             slot.status = SLOT_FILLED
 
-    # ── Detect TP fills ──────────────────────────────────────────────────────
-    # Track TP prices that fired this cycle to avoid placing a new entry at the
-    # exact same price in the same cycle (which would immediately re-open the
-    # position that was just closed).
     filled_tp_prices: set = set()
     all_slots = list(active_slots)
     for slot in all_slots:
@@ -802,14 +763,35 @@ async def run_one_cycle(
                 f"{'LONG' if slot.is_long else 'SHORT'} TP @{slot.tp_price:.4f}",
                 "disappeared-without-fill-evidence", slot.is_long, True, slot=slot, slot_kind="tp",
             )
-            # Reset so should_refill_tp_for_slot can re-queue this slot next cycle
-            # rather than leaving it stuck with a stale tp_order_idx forever.
             slot.tp_order_idx = 0
             slot.tp_base_amount = 0
             continue
 
         slot.status = SLOT_IDLE
         filled_tp_prices.add(slot.tp_price)
+        _tp_fired = slot.tp_price
+        for _ge in list(state.recent_tp_fire_prices):
+            _req = state.recent_tp_fire_prices[_ge]
+            if (side == SIDE_SHORT and _tp_fired <= _req) or \
+               (side == SIDE_LONG  and _tp_fired >= _req):
+                del state.recent_tp_fire_prices[_ge]
+                LOGGER.info(
+                    "[entry:tp-cooldown-cleared] side=%s entry@%.4f unguarded "
+                    "by TP@%.4f (required_tp %s %.4f)",
+                    side, _ge, _tp_fired,
+                    "<=" if side == SIDE_SHORT else ">=", _req,
+                )
+        _clear_req = (
+            slot.tp_price - cfg.price_step if side == SIDE_SHORT
+            else slot.tp_price + cfg.price_step
+        )
+        state.recent_tp_fire_prices[_tp_fired] = _clear_req
+        LOGGER.debug(
+            "[entry:tp-cooldown-set] side=%s blocked entry@%.4f "
+            "until TP %s %.4f fires",
+            side, _tp_fired,
+            "<=" if side == SIDE_SHORT else ">=", _clear_req,
+        )
         state.success_count += 1
         _today = _dt.datetime.now(_SHANGHAI_TZ).date().isoformat()
         if state.today_tp_date != _today:
@@ -840,9 +822,6 @@ async def run_one_cycle(
             state.today_tp_count, state.today_tp_date, slot.place_price, slot.tp_price,
         )
 
-    # ── Refill missing TP only when TP level is far enough from current price ─
-    # Track slots whose TPs were evicted this cycle to avoid re-processing them
-    # in the same loop (which would trigger infinite within-cycle oscillation).
     evicted_tp_slot_keys: set = set()
     all_slots = list(active_slots)
     refill_candidates = sorted(
@@ -850,7 +829,6 @@ async def run_one_cycle(
         key=lambda slot: abs(slot.tp_price - current_price),
     )
     for slot in refill_candidates:
-        # Skip slots whose TPs were just cleared this cycle by an earlier refill
         slot_key = GridState.price_key(slot.place_price)
         if slot_key in evicted_tp_slot_keys:
             continue
@@ -883,11 +861,6 @@ async def run_one_cycle(
             current_price=current_price,
             desired_tp_price=slot.tp_price,
             reason=f"tp-refill@{slot.tp_price:.4f}",
-            # Do NOT force-replace: if all existing TPs are closer to current
-            # price than the desired TP, skip this refill.  Forcing would evict
-            # a closer (more-likely-to-execute) TP in favour of a farther one,
-            # causing endless cancel/replace oscillation when there are more
-            # FILLED slots than the TP cap.
         )
         if evicted_key is None:
             continue
@@ -904,8 +877,6 @@ async def run_one_cycle(
         if ok:
             slot.tp_order_idx = tp_idx
             slot.tp_base_amount = base_amount
-            # Same as entry-fill path: prevent same-cycle TP-fill detection
-            # from treating this newly placed order as disappeared.
             active_set[tp_idx] = True
         else:
             LOGGER.error(
@@ -915,7 +886,6 @@ async def run_one_cycle(
                 cfg.tp_refill_min_steps,
             )
 
-    # ── Place new entry orders to fill grid ──────────────────────────────────
     if side == SIDE_LONG:
         for i in range(cfg.levels):
             place_price = aligned - cfg.price_step * i
@@ -925,6 +895,12 @@ async def run_one_cycle(
                 LOGGER.info(
                     "[entry:skip-tp-reopen] side=long place_price=%.4f tp=%.4f skipped (fired_tp_prices=%s)",
                     place_price, place_price + cfg.price_step, filled_tp_prices,
+                )
+                continue
+            if place_price in state.recent_tp_fire_prices:
+                LOGGER.info(
+                    "[entry:skip-tp-cooldown] side=long place_price=%.4f blocked until TP >= %.4f fires",
+                    place_price, state.recent_tp_fire_prices[place_price],
                 )
                 continue
             k    = GridState.price_key(place_price)
@@ -954,6 +930,12 @@ async def run_one_cycle(
                 LOGGER.info(
                     "[entry:skip-tp-reopen] side=short place_price=%.4f tp=%.4f skipped (fired_tp_prices=%s)",
                     place_price, place_price - cfg.price_step, filled_tp_prices,
+                )
+                continue
+            if place_price in state.recent_tp_fire_prices:
+                LOGGER.info(
+                    "[entry:skip-tp-cooldown] side=short place_price=%.4f blocked until TP <= %.4f fires",
+                    place_price, state.recent_tp_fire_prices[place_price],
                 )
                 continue
             k    = GridState.price_key(place_price)

@@ -221,8 +221,6 @@ async def do_market_add_position(
         record_order_lifecycle(monitor, order_idx, label, "dry-run", is_ask, False)
         return True
 
-    # Market orders still require a valid price threshold in this SDK/exchange path.
-    # Use current best price as avg_execution_price to satisfy validation.
     best_price = await client.get_best_price(market_id, is_ask)
     avg_execution_price = max(1, int(best_price))
     _, tx_hash, err = await client.create_market_order(

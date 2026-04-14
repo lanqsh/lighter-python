@@ -102,7 +102,6 @@ async def maybe_send_daily_bark_report(
     await asyncio.to_thread(_send_bark_message, bark_server, message)
     LOGGER.info("[bark:daily-report] sent date=%s shanghai_time=%s", today_sh, now_sh.isoformat())
 
-    # Reset today_tp count after daily report
     state.prev_day_tp_count = state.today_tp_count
     state.prev_day_tp_date = state.today_tp_date
     state.today_tp_count = 0

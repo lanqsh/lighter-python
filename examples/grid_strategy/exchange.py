@@ -16,7 +16,6 @@ LOGGER = logging.getLogger("smart_grid")
 
 
 def format_api_exception(exc: Exception) -> str:
-    """Return a concise summary of an ApiException, parsing the JSON body when available."""
     status = getattr(exc, "status", None)
     body = getattr(exc, "body", None)
     if body:
@@ -35,7 +34,6 @@ def format_api_exception(exc: Exception) -> str:
 
 
 def is_rate_limited_exception(exc: Exception) -> bool:
-    """Return True when the server explicitly responded with HTTP 429."""
     if isinstance(exc, ApiException):
         return getattr(exc, "status", None) == 429
     return False
