@@ -24,6 +24,7 @@ from exchange import (
     fetch_market_detail,
     format_api_exception,
     initialize_runtime_monitor,
+    is_auth_error_exception,
     is_rate_limited_exception,
     is_retryable_exception,
 )
@@ -369,7 +370,13 @@ async def run_strategy() -> None:
                     bark_server=bark_server,
                 )
             except Exception as e:
-                if is_retryable_exception(e):
+                if is_auth_error_exception(e):
+                    LOGGER.warning(
+                        "[cycle:auth-error] cycle=%s invalid signature — force-refreshing token and retrying next cycle",
+                        cycle,
+                    )
+                    await auth_mgr.force_refresh()
+                elif is_retryable_exception(e):
                     if is_rate_limited_exception(e):
                         if not _in_rate_limit:
                             new_interval = min(cfg.poll_interval_sec * _POLL_BACKOFF_FACTOR, _POLL_MAX_SEC)

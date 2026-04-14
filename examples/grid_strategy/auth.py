@@ -24,3 +24,7 @@ class AuthTokenManager:
             self._expire_at = time.time() + self._ttl
             LOGGER.info("[auth] token refreshed (valid %ss)", self._ttl)
         return self._token
+
+    async def force_refresh(self) -> str:
+        self._expire_at = 0.0
+        return await self.get()

@@ -39,6 +39,13 @@ def is_rate_limited_exception(exc: Exception) -> bool:
     return False
 
 
+def is_auth_error_exception(exc: Exception) -> bool:
+    if isinstance(exc, ApiException) and getattr(exc, "status", None) == 400:
+        body = getattr(exc, "body", "") or ""
+        return "invalid signature" in body.lower()
+    return False
+
+
 def is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return True
