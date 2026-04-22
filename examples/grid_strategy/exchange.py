@@ -49,6 +49,12 @@ def is_auth_error_exception(exc: Exception) -> bool:
 def is_retryable_exception(exc: Exception) -> bool:
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return True
+    exc_name = exc.__class__.__name__
+    exc_module = exc.__class__.__module__
+    if (exc_name in {"ClientPayloadError", "ClientConnectionError"} and exc_module.startswith("aiohttp")):
+        return True
+    if isinstance(exc, ConnectionResetError):
+        return True
     if isinstance(exc, ApiException):
         status = getattr(exc, "status", None)
         if isinstance(status, int) and status in RETRYABLE_HTTP_STATUS:
@@ -64,6 +70,7 @@ def is_retryable_exception(exc: Exception) -> bool:
 
 async def fetch_market_detail(order_api: lighter.OrderApi, market_id: int) -> Any:
     max_attempts = 3
+    last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             resp = await order_api.order_book_details(market_id=market_id)
@@ -75,6 +82,7 @@ async def fetch_market_detail(order_api: lighter.OrderApi, market_id: int) -> An
         except RuntimeError:
             raise
         except Exception as exc:
+            last_exc = exc
             if not is_retryable_exception(exc) or attempt >= max_attempts:
                 raise
             delay = 0.6 * attempt
@@ -83,7 +91,9 @@ async def fetch_market_detail(order_api: lighter.OrderApi, market_id: int) -> An
                 market_id, attempt, max_attempts, format_api_exception(exc), delay,
             )
             await asyncio.sleep(delay)
-    raise RuntimeError(f"fetch_market_detail exhausted retries for market_id={market_id}")
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"fetch_market_detail failed without exception for market_id={market_id}")
 
 
 async def fetch_active_orders(

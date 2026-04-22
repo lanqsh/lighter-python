@@ -129,26 +129,26 @@ async def run_strategy() -> None:
         api_private_keys=private_keys,
     )
 
-    resolved_market_id, resolved_symbol = await resolve_market_id_by_selector(order_api, cfg.market_symbol)
-    cfg.market_id = resolved_market_id
-
-    log_path = setup_logging(cfg.market_id, cfg.side)
-    trace_path = setup_order_trace_file(cfg.market_id, cfg.side)
-    LOGGER.info("[config] using: %s", resolved_cfg_path)
-    LOGGER.info("[config] bark_enabled=%s", bool(bark_server))
-    LOGGER.info(
-        "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s tp_refill_min_steps=%s tp_refill_max_steps=%s",
-        cfg.market_symbol, resolved_symbol, cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
-        cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run, cfg.tp_refill_min_steps, cfg.tp_refill_max_steps,
-    )
-    LOGGER.info("[logger] active log file: %s", log_path)
-    LOGGER.info("[trace:file] active order trace file: %s", trace_path)
-
     state:      Optional[GridState] = None
     monitor = RuntimeMonitor()
     auth_mgr = AuthTokenManager(client, ttl_sec=3600)
 
     try:
+        resolved_market_id, resolved_symbol = await resolve_market_id_by_selector(order_api, cfg.market_symbol)
+        cfg.market_id = resolved_market_id
+
+        log_path = setup_logging(cfg.market_id, cfg.side)
+        trace_path = setup_order_trace_file(cfg.market_id, cfg.side)
+        LOGGER.info("[config] using: %s", resolved_cfg_path)
+        LOGGER.info("[config] bark_enabled=%s", bool(bark_server))
+        LOGGER.info(
+            "[config] market_selector=%s resolved_symbol=%s market_id=%s levels=%s price_step=%s leverage=%sx base_amount=%s side=%s poll_interval=%ss max_cycles=%s start_order_index=%s dry_run=%s tp_refill_min_steps=%s tp_refill_max_steps=%s",
+            cfg.market_symbol, resolved_symbol, cfg.market_id, cfg.levels, cfg.price_step, cfg.leverage, cfg.base_amount, cfg.side,
+            cfg.poll_interval_sec, cfg.max_cycles, cfg.start_order_index, cfg.dry_run, cfg.tp_refill_min_steps, cfg.tp_refill_max_steps,
+        )
+        LOGGER.info("[logger] active log file: %s", log_path)
+        LOGGER.info("[trace:file] active order trace file: %s", trace_path)
+
         err = client.check_client()
         if err is not None:
             raise RuntimeError(f"check_client failed: {err}")
@@ -298,7 +298,21 @@ async def run_strategy() -> None:
         _POLL_BACKOFF_FACTOR     = 1.5
         _POLL_MAX_SEC            = cfg.poll_interval_sec * 3.0
         _RATE_LIMIT_COOLDOWN_SEC = 60.0
+        _NON_RETRYABLE_MAX       = 3
         _in_rate_limit           = False
+        _consecutive_non_retryable = 0
+
+        LOGGER.info(
+            "[startup:self-check] auth_token_attempts=%s market_selector_attempts=%s market_detail_attempts=%s non_retryable_exit_threshold=%s poll_interval=%.1fs rate_limit_cooldown=%.1fs poll_backoff=%.2f poll_max=%.1fs",
+            AuthTokenManager.TOKEN_MAX_ATTEMPTS,
+            3,
+            3,
+            _NON_RETRYABLE_MAX,
+            cfg.poll_interval_sec,
+            _RATE_LIMIT_COOLDOWN_SEC,
+            _POLL_BACKOFF_FACTOR,
+            _POLL_MAX_SEC,
+        )
 
         while cfg.max_cycles == 0 or cycle < cfg.max_cycles:
             await asyncio.sleep(cfg.poll_interval_sec)
@@ -332,7 +346,17 @@ async def run_strategy() -> None:
                     else:
                         LOGGER.warning("[cycle:market-detail-error] cycle=%s reason=%s", cycle, format_api_exception(e))
                     continue
-                raise
+                _consecutive_non_retryable += 1
+                LOGGER.error(
+                    "[cycle:market-detail-non-retryable] cycle=%s consecutive=%s/%s reason=%s",
+                    cycle,
+                    _consecutive_non_retryable,
+                    _NON_RETRYABLE_MAX,
+                    format_api_exception(e),
+                )
+                if _consecutive_non_retryable >= _NON_RETRYABLE_MAX:
+                    raise
+                continue
             current_price = float(market_detail.last_trade_price)
 
             LOGGER.info("cycle=%s price=%.4f %s", cycle, current_price, state.summary())
@@ -402,9 +426,19 @@ async def run_strategy() -> None:
                     else:
                         LOGGER.warning("[cycle:transient-error] cycle=%s reason=%s", cycle, format_api_exception(e))
                 else:
-                    raise
+                    _consecutive_non_retryable += 1
+                    LOGGER.error(
+                        "[cycle:non-retryable] cycle=%s consecutive=%s/%s reason=%s",
+                        cycle,
+                        _consecutive_non_retryable,
+                        _NON_RETRYABLE_MAX,
+                        format_api_exception(e),
+                    )
+                    if _consecutive_non_retryable >= _NON_RETRYABLE_MAX:
+                        raise
             else:
                 _in_rate_limit = False
+                _consecutive_non_retryable = 0
 
             today = _dt.datetime.now(SHANGHAI_TZ).date().isoformat()
             today_tp = state.today_tp_count if state.today_tp_date == today else 0
