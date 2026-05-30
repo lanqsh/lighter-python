@@ -65,10 +65,11 @@ target/
 .ipynb_checkpoints
 openapi-generator-cli.jar
 
-
+.DS_Store
 .idea
 
 examples/secrets.py
+examples/system_setup_local.py
 
 # Environment variables
 .env

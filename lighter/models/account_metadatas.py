@@ -30,8 +30,9 @@ class AccountMetadatas(BaseModel):
     code: StrictInt
     message: Optional[StrictStr] = None
     account_metadatas: List[AccountMetadata]
+    next_cursor: Optional[StrictStr] = None
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["code", "message", "account_metadatas"]
+    __properties: ClassVar[List[str]] = ["code", "message", "account_metadatas", "next_cursor"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -100,7 +101,8 @@ class AccountMetadatas(BaseModel):
         _obj = cls.model_construct(**{
             "code": obj.get("code"),
             "message": obj.get("message"),
-            "account_metadatas": [AccountMetadata.from_dict(_item) for _item in obj["account_metadatas"]] if obj.get("account_metadatas") is not None else None
+            "account_metadatas": [AccountMetadata.from_dict(_item) for _item in obj["account_metadatas"]] if obj.get("account_metadatas") is not None else None,
+            "next_cursor": obj.get("next_cursor")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

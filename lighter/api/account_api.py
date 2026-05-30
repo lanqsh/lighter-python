@@ -26,17 +26,25 @@ from lighter.models.account_pn_l import AccountPnL
 from lighter.models.detailed_accounts import DetailedAccounts
 from lighter.models.l1_metadata import L1Metadata
 from lighter.models.liquidation_infos import LiquidationInfos
+from lighter.models.partner_stats import PartnerStats
 from lighter.models.position_fundings import PositionFundings
 from lighter.models.resp_change_account_tier import RespChangeAccountTier
+from lighter.models.resp_create_rfq import RespCreateRFQ
 from lighter.models.resp_get_api_tokens import RespGetApiTokens
 from lighter.models.resp_get_lease_options import RespGetLeaseOptions
 from lighter.models.resp_get_leases import RespGetLeases
+from lighter.models.resp_get_maker_only_api_keys import RespGetMakerOnlyApiKeys
+from lighter.models.resp_get_rfq import RespGetRFQ
+from lighter.models.resp_list_rfqs import RespListRFQs
 from lighter.models.resp_post_api_token import RespPostApiToken
 from lighter.models.resp_public_pools_metadata import RespPublicPoolsMetadata
+from lighter.models.resp_respond_to_rfq import RespRespondToRFQ
 from lighter.models.resp_revoke_api_token import RespRevokeApiToken
-from lighter.models.result_code import ResultCode
+from lighter.models.resp_set_maker_only_api_keys import RespSetMakerOnlyApiKeys
+from lighter.models.resp_update_rfq import RespUpdateRFQ
 from lighter.models.sub_accounts import SubAccounts
 from lighter.models.tx_hash import TxHash
+from lighter.models.user_referrals import UserReferrals
 
 from lighter.api_client import ApiClient, RequestSerialized
 from lighter.api_response import ApiResponse
@@ -60,6 +68,8 @@ class AccountApi:
         self,
         by: StrictStr,
         value: StrictStr,
+        active_only: Annotated[Optional[StrictBool], Field(description="Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.")] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -75,12 +85,16 @@ class AccountApi:
     ) -> DetailedAccounts:
         """account
 
-        Get account by account's index. <br>More details about account index: [Account Index](https://apidocs.lighter.xyz/docs/account-index)<hr>**Response Description:**<br><br>1) **Status:** 1 is active 0 is inactive.<br>2) **Collateral:** The amount of collateral in the account.<hr>**Position Details Description:**<br>1) **OOC:** Open order count in that market.<br>2) **Sign:** 1 for Long, -1 for Short.<br>3) **Position:** The amount of position in that market.<br>4) **Avg Entry Price:** The average entry price of the position.<br>5) **Position Value:** The value of the position.<br>6) **Unrealized PnL:** The unrealized profit and loss of the position.<br>7) **Realized PnL:** The realized profit and loss of the position.
+        Get account by an account's index, or L1 address
 
         :param by: (required)
         :type by: str
         :param value: (required)
         :type value: str
+        :param active_only: Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.
+        :type active_only: bool
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -106,6 +120,8 @@ class AccountApi:
         _param = self._account_serialize(
             by=by,
             value=value,
+            active_only=active_only,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -131,6 +147,8 @@ class AccountApi:
         self,
         by: StrictStr,
         value: StrictStr,
+        active_only: Annotated[Optional[StrictBool], Field(description="Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.")] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -146,12 +164,16 @@ class AccountApi:
     ) -> ApiResponse[DetailedAccounts]:
         """account
 
-        Get account by account's index. <br>More details about account index: [Account Index](https://apidocs.lighter.xyz/docs/account-index)<hr>**Response Description:**<br><br>1) **Status:** 1 is active 0 is inactive.<br>2) **Collateral:** The amount of collateral in the account.<hr>**Position Details Description:**<br>1) **OOC:** Open order count in that market.<br>2) **Sign:** 1 for Long, -1 for Short.<br>3) **Position:** The amount of position in that market.<br>4) **Avg Entry Price:** The average entry price of the position.<br>5) **Position Value:** The value of the position.<br>6) **Unrealized PnL:** The unrealized profit and loss of the position.<br>7) **Realized PnL:** The realized profit and loss of the position.
+        Get account by an account's index, or L1 address
 
         :param by: (required)
         :type by: str
         :param value: (required)
         :type value: str
+        :param active_only: Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.
+        :type active_only: bool
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -177,6 +199,8 @@ class AccountApi:
         _param = self._account_serialize(
             by=by,
             value=value,
+            active_only=active_only,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -202,6 +226,8 @@ class AccountApi:
         self,
         by: StrictStr,
         value: StrictStr,
+        active_only: Annotated[Optional[StrictBool], Field(description="Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.")] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -217,12 +243,16 @@ class AccountApi:
     ) -> RESTResponseType:
         """account
 
-        Get account by account's index. <br>More details about account index: [Account Index](https://apidocs.lighter.xyz/docs/account-index)<hr>**Response Description:**<br><br>1) **Status:** 1 is active 0 is inactive.<br>2) **Collateral:** The amount of collateral in the account.<hr>**Position Details Description:**<br>1) **OOC:** Open order count in that market.<br>2) **Sign:** 1 for Long, -1 for Short.<br>3) **Position:** The amount of position in that market.<br>4) **Avg Entry Price:** The average entry price of the position.<br>5) **Position Value:** The value of the position.<br>6) **Unrealized PnL:** The unrealized profit and loss of the position.<br>7) **Realized PnL:** The realized profit and loss of the position.
+        Get account by an account's index, or L1 address
 
         :param by: (required)
         :type by: str
         :param value: (required)
         :type value: str
+        :param active_only: Hide markets for which leverage and margin settings are present (meaning the account traded it at least once), but with no active position.
+        :type active_only: bool
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -248,6 +278,8 @@ class AccountApi:
         _param = self._account_serialize(
             by=by,
             value=value,
+            active_only=active_only,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -269,6 +301,8 @@ class AccountApi:
         self,
         by,
         value,
+        active_only,
+        cursor,
         _request_auth,
         _content_type,
         _headers,
@@ -296,6 +330,14 @@ class AccountApi:
         if value is not None:
             
             _query_params.append(('value', value))
+            
+        if active_only is not None:
+            
+            _query_params.append(('active_only', active_only))
+            
+        if cursor is not None:
+            
+            _query_params.append(('cursor', cursor))
             
         # process the header parameters
         # process the form parameters
@@ -336,8 +378,7 @@ class AccountApi:
     async def account_limits(
         self,
         account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -353,14 +394,12 @@ class AccountApi:
     ) -> AccountLimits:
         """accountLimits
 
-        Get account limits
+        Get account limits. For more details on account types, see this page: https://apidocs.lighter.xyz/docs/account-types
 
         :param account_index: (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: (required)
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -386,7 +425,6 @@ class AccountApi:
         _param = self._account_limits_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -411,8 +449,7 @@ class AccountApi:
     async def account_limits_with_http_info(
         self,
         account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -428,14 +465,12 @@ class AccountApi:
     ) -> ApiResponse[AccountLimits]:
         """accountLimits
 
-        Get account limits
+        Get account limits. For more details on account types, see this page: https://apidocs.lighter.xyz/docs/account-types
 
         :param account_index: (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: (required)
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -461,7 +496,6 @@ class AccountApi:
         _param = self._account_limits_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -486,8 +520,7 @@ class AccountApi:
     async def account_limits_without_preload_content(
         self,
         account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: StrictStr,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -503,14 +536,12 @@ class AccountApi:
     ) -> RESTResponseType:
         """accountLimits
 
-        Get account limits
+        Get account limits. For more details on account types, see this page: https://apidocs.lighter.xyz/docs/account-types
 
         :param account_index: (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: (required)
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -536,7 +567,6 @@ class AccountApi:
         _param = self._account_limits_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -558,7 +588,6 @@ class AccountApi:
         self,
         account_index,
         authorization,
-        auth,
         _request_auth,
         _content_type,
         _headers,
@@ -583,15 +612,9 @@ class AccountApi:
             
             _query_params.append(('account_index', account_index))
             
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -632,7 +655,7 @@ class AccountApi:
         by: StrictStr,
         value: StrictStr,
         authorization: Optional[StrictStr] = None,
-        auth: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -656,8 +679,8 @@ class AccountApi:
         :type value: str
         :param authorization:
         :type authorization: str
-        :param auth:
-        :type auth: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -684,7 +707,7 @@ class AccountApi:
             by=by,
             value=value,
             authorization=authorization,
-            auth=auth,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -711,7 +734,7 @@ class AccountApi:
         by: StrictStr,
         value: StrictStr,
         authorization: Optional[StrictStr] = None,
-        auth: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -735,8 +758,8 @@ class AccountApi:
         :type value: str
         :param authorization:
         :type authorization: str
-        :param auth:
-        :type auth: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -763,7 +786,7 @@ class AccountApi:
             by=by,
             value=value,
             authorization=authorization,
-            auth=auth,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -790,7 +813,7 @@ class AccountApi:
         by: StrictStr,
         value: StrictStr,
         authorization: Optional[StrictStr] = None,
-        auth: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -814,8 +837,8 @@ class AccountApi:
         :type value: str
         :param authorization:
         :type authorization: str
-        :param auth:
-        :type auth: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -842,7 +865,7 @@ class AccountApi:
             by=by,
             value=value,
             authorization=authorization,
-            auth=auth,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -865,7 +888,7 @@ class AccountApi:
         by,
         value,
         authorization,
-        auth,
+        cursor,
         _request_auth,
         _content_type,
         _headers,
@@ -894,9 +917,9 @@ class AccountApi:
             
             _query_params.append(('value', value))
             
-        if auth is not None:
+        if cursor is not None:
             
-            _query_params.append(('auth', auth))
+            _query_params.append(('cursor', cursor))
             
         # process the header parameters
         if authorization is not None:
@@ -939,6 +962,7 @@ class AccountApi:
     async def accounts_by_l1_address(
         self,
         l1_address: StrictStr,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -954,10 +978,12 @@ class AccountApi:
     ) -> SubAccounts:
         """accountsByL1Address
 
-        Get accounts by l1_address returns all accounts associated with the given L1 address
+        Returns all accounts associated with the given L1 address
 
         :param l1_address: (required)
         :type l1_address: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -982,6 +1008,7 @@ class AccountApi:
 
         _param = self._accounts_by_l1_address_serialize(
             l1_address=l1_address,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1006,6 +1033,7 @@ class AccountApi:
     async def accounts_by_l1_address_with_http_info(
         self,
         l1_address: StrictStr,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1021,10 +1049,12 @@ class AccountApi:
     ) -> ApiResponse[SubAccounts]:
         """accountsByL1Address
 
-        Get accounts by l1_address returns all accounts associated with the given L1 address
+        Returns all accounts associated with the given L1 address
 
         :param l1_address: (required)
         :type l1_address: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1049,6 +1079,7 @@ class AccountApi:
 
         _param = self._accounts_by_l1_address_serialize(
             l1_address=l1_address,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1073,6 +1104,7 @@ class AccountApi:
     async def accounts_by_l1_address_without_preload_content(
         self,
         l1_address: StrictStr,
+        cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1088,10 +1120,12 @@ class AccountApi:
     ) -> RESTResponseType:
         """accountsByL1Address
 
-        Get accounts by l1_address returns all accounts associated with the given L1 address
+        Returns all accounts associated with the given L1 address
 
         :param l1_address: (required)
         :type l1_address: str
+        :param cursor:
+        :type cursor: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1116,6 +1150,7 @@ class AccountApi:
 
         _param = self._accounts_by_l1_address_serialize(
             l1_address=l1_address,
+            cursor=cursor,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1136,6 +1171,7 @@ class AccountApi:
     def _accounts_by_l1_address_serialize(
         self,
         l1_address,
+        cursor,
         _request_auth,
         _content_type,
         _headers,
@@ -1159,6 +1195,10 @@ class AccountApi:
         if l1_address is not None:
             
             _query_params.append(('l1_address', l1_address))
+            
+        if cursor is not None:
+            
+            _query_params.append(('cursor', cursor))
             
         # process the header parameters
         # process the form parameters
@@ -1494,7 +1534,7 @@ class AccountApi:
     ) -> RespChangeAccountTier:
         """changeAccountTier
 
-        Change account tier
+        Change account tier. You can only perform this action once every 24 hours, and with no orders or positions open.
 
         :param account_index: (required)
         :type account_index: int
@@ -1573,7 +1613,7 @@ class AccountApi:
     ) -> ApiResponse[RespChangeAccountTier]:
         """changeAccountTier
 
-        Change account tier
+        Change account tier. You can only perform this action once every 24 hours, and with no orders or positions open.
 
         :param account_index: (required)
         :type account_index: int
@@ -1652,7 +1692,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """changeAccountTier
 
-        Change account tier
+        Change account tier. You can only perform this action once every 24 hours, and with no orders or positions open.
 
         :param account_index: (required)
         :type account_index: int
@@ -1760,7 +1800,7 @@ class AccountApi:
             _default_content_type = (
                 self.api_client.select_header_content_type(
                     [
-                        'multipart/form-data'
+                        'application/x-www-form-urlencoded'
                     ]
                 )
             )
@@ -1789,10 +1829,10 @@ class AccountApi:
 
 
 
-    async def faucet(
+    async def get_maker_only_api_keys(
         self,
-        l1_address: StrictStr,
-        do_l1_transfer: StrictBool,
+        authorization: StrictStr,
+        account_index: StrictInt,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1805,15 +1845,15 @@ class AccountApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ResultCode:
-        """faucet
+    ) -> RespGetMakerOnlyApiKeys:
+        """getMakerOnlyApiKeys
 
-        Request funds from faucet
+        Get maker-only API key indexes
 
-        :param l1_address: (required)
-        :type l1_address: str
-        :param do_l1_transfer: (required)
-        :type do_l1_transfer: bool
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1836,9 +1876,9 @@ class AccountApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._faucet_serialize(
-            l1_address=l1_address,
-            do_l1_transfer=do_l1_transfer,
+        _param = self._get_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1846,7 +1886,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ResultCode",
+            '200': "RespGetMakerOnlyApiKeys",
             '400': "ResultCode",
         }
         response_data = await self.api_client.call_api(
@@ -1860,10 +1900,10 @@ class AccountApi:
         ).data
 
 
-    async def faucet_with_http_info(
+    async def get_maker_only_api_keys_with_http_info(
         self,
-        l1_address: StrictStr,
-        do_l1_transfer: StrictBool,
+        authorization: StrictStr,
+        account_index: StrictInt,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1876,15 +1916,15 @@ class AccountApi:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ResultCode]:
-        """faucet
+    ) -> ApiResponse[RespGetMakerOnlyApiKeys]:
+        """getMakerOnlyApiKeys
 
-        Request funds from faucet
+        Get maker-only API key indexes
 
-        :param l1_address: (required)
-        :type l1_address: str
-        :param do_l1_transfer: (required)
-        :type do_l1_transfer: bool
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1907,9 +1947,9 @@ class AccountApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._faucet_serialize(
-            l1_address=l1_address,
-            do_l1_transfer=do_l1_transfer,
+        _param = self._get_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1917,7 +1957,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ResultCode",
+            '200': "RespGetMakerOnlyApiKeys",
             '400': "ResultCode",
         }
         response_data = await self.api_client.call_api(
@@ -1931,10 +1971,10 @@ class AccountApi:
         )
 
 
-    async def faucet_without_preload_content(
+    async def get_maker_only_api_keys_without_preload_content(
         self,
-        l1_address: StrictStr,
-        do_l1_transfer: StrictBool,
+        authorization: StrictStr,
+        account_index: StrictInt,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -1948,14 +1988,14 @@ class AccountApi:
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
     ) -> RESTResponseType:
-        """faucet
+        """getMakerOnlyApiKeys
 
-        Request funds from faucet
+        Get maker-only API key indexes
 
-        :param l1_address: (required)
-        :type l1_address: str
-        :param do_l1_transfer: (required)
-        :type do_l1_transfer: bool
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -1978,9 +2018,9 @@ class AccountApi:
         :return: Returns the result object.
         """ # noqa: E501
 
-        _param = self._faucet_serialize(
-            l1_address=l1_address,
-            do_l1_transfer=do_l1_transfer,
+        _param = self._get_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -1988,7 +2028,7 @@ class AccountApi:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ResultCode",
+            '200': "RespGetMakerOnlyApiKeys",
             '400': "ResultCode",
         }
         response_data = await self.api_client.call_api(
@@ -1998,10 +2038,10 @@ class AccountApi:
         return response_data.response
 
 
-    def _faucet_serialize(
+    def _get_maker_only_api_keys_serialize(
         self,
-        l1_address,
-        do_l1_transfer,
+        authorization,
+        account_index,
         _request_auth,
         _content_type,
         _headers,
@@ -2022,15 +2062,13 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if l1_address is not None:
+        if account_index is not None:
             
-            _query_params.append(('l1_address', l1_address))
-            
-        if do_l1_transfer is not None:
-            
-            _query_params.append(('do_l1_transfer', do_l1_transfer))
+            _query_params.append(('account_index', account_index))
             
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -2050,7 +2088,7 @@ class AccountApi:
 
         return self.api_client.param_serialize(
             method='GET',
-            resource_path='/api/v1/faucet',
+            resource_path='/api/v1/getMakerOnlyApiKeys',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,
@@ -2068,9 +2106,8 @@ class AccountApi:
 
     async def l1_metadata(
         self,
+        authorization: StrictStr,
         l1_address: StrictStr,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2088,12 +2125,10 @@ class AccountApi:
 
         Get L1 metadata
 
+        :param authorization: (required)
+        :type authorization: str
         :param l1_address: (required)
         :type l1_address: str
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2117,9 +2152,8 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._l1_metadata_serialize(
-            l1_address=l1_address,
             authorization=authorization,
-            auth=auth,
+            l1_address=l1_address,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2143,9 +2177,8 @@ class AccountApi:
 
     async def l1_metadata_with_http_info(
         self,
+        authorization: StrictStr,
         l1_address: StrictStr,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2163,12 +2196,10 @@ class AccountApi:
 
         Get L1 metadata
 
+        :param authorization: (required)
+        :type authorization: str
         :param l1_address: (required)
         :type l1_address: str
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2192,9 +2223,8 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._l1_metadata_serialize(
-            l1_address=l1_address,
             authorization=authorization,
-            auth=auth,
+            l1_address=l1_address,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2218,9 +2248,8 @@ class AccountApi:
 
     async def l1_metadata_without_preload_content(
         self,
+        authorization: StrictStr,
         l1_address: StrictStr,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2238,12 +2267,10 @@ class AccountApi:
 
         Get L1 metadata
 
+        :param authorization: (required)
+        :type authorization: str
         :param l1_address: (required)
         :type l1_address: str
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2267,9 +2294,8 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._l1_metadata_serialize(
-            l1_address=l1_address,
             authorization=authorization,
-            auth=auth,
+            l1_address=l1_address,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2289,9 +2315,8 @@ class AccountApi:
 
     def _l1_metadata_serialize(
         self,
-        l1_address,
         authorization,
-        auth,
+        l1_address,
         _request_auth,
         _content_type,
         _headers,
@@ -2312,10 +2337,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if l1_address is not None:
             
             _query_params.append(('l1_address', l1_address))
@@ -2375,7 +2396,7 @@ class AccountApi:
     ) -> RespGetLeaseOptions:
         """leaseOptions
 
-        Get lease options
+        Returns available lease duration/rate tiers, sorted by duration descending.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -2438,7 +2459,7 @@ class AccountApi:
     ) -> ApiResponse[RespGetLeaseOptions]:
         """leaseOptions
 
-        Get lease options
+        Returns available lease duration/rate tiers, sorted by duration descending.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -2501,7 +2522,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """leaseOptions
 
-        Get lease options
+        Returns available lease duration/rate tiers, sorted by duration descending.
 
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -2603,11 +2624,11 @@ class AccountApi:
 
     async def leases(
         self,
-        account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
-        cursor: Optional[StrictStr] = None,
-        limit: Optional[StrictInt] = None,
+        account_index: Annotated[StrictInt, Field(description="Account index to fetch leases for")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
+        cursor: Annotated[Optional[StrictStr], Field(description="Pagination cursor from a previous response")] = None,
+        limit: Annotated[Optional[Annotated[int, Field(le=100, strict=True, ge=1)]], Field(description="Number of results to return (1–100, default 20)")] = None,
+        auth: Annotated[Optional[StrictStr], Field(description="Read-only auth (alternative to header authorization)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2623,18 +2644,18 @@ class AccountApi:
     ) -> RespGetLeases:
         """leases
 
-        Get leases
+        Returns paginated lease entries for an account, most recent first. Supports read-only auth via signature/account_index/timestamp query params.
 
-        :param account_index: (required)
+        :param account_index: Account index to fetch leases for (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: API token authorization
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
-        :param cursor:
+        :param cursor: Pagination cursor from a previous response
         :type cursor: str
-        :param limit:
+        :param limit: Number of results to return (1–100, default 20)
         :type limit: int
+        :param auth: Read-only auth (alternative to header authorization)
+        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2660,9 +2681,9 @@ class AccountApi:
         _param = self._leases_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             cursor=cursor,
             limit=limit,
+            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2686,11 +2707,11 @@ class AccountApi:
 
     async def leases_with_http_info(
         self,
-        account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
-        cursor: Optional[StrictStr] = None,
-        limit: Optional[StrictInt] = None,
+        account_index: Annotated[StrictInt, Field(description="Account index to fetch leases for")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
+        cursor: Annotated[Optional[StrictStr], Field(description="Pagination cursor from a previous response")] = None,
+        limit: Annotated[Optional[Annotated[int, Field(le=100, strict=True, ge=1)]], Field(description="Number of results to return (1–100, default 20)")] = None,
+        auth: Annotated[Optional[StrictStr], Field(description="Read-only auth (alternative to header authorization)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2706,18 +2727,18 @@ class AccountApi:
     ) -> ApiResponse[RespGetLeases]:
         """leases
 
-        Get leases
+        Returns paginated lease entries for an account, most recent first. Supports read-only auth via signature/account_index/timestamp query params.
 
-        :param account_index: (required)
+        :param account_index: Account index to fetch leases for (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: API token authorization
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
-        :param cursor:
+        :param cursor: Pagination cursor from a previous response
         :type cursor: str
-        :param limit:
+        :param limit: Number of results to return (1–100, default 20)
         :type limit: int
+        :param auth: Read-only auth (alternative to header authorization)
+        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2743,9 +2764,9 @@ class AccountApi:
         _param = self._leases_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             cursor=cursor,
             limit=limit,
+            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2769,11 +2790,11 @@ class AccountApi:
 
     async def leases_without_preload_content(
         self,
-        account_index: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
-        cursor: Optional[StrictStr] = None,
-        limit: Optional[StrictInt] = None,
+        account_index: Annotated[StrictInt, Field(description="Account index to fetch leases for")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
+        cursor: Annotated[Optional[StrictStr], Field(description="Pagination cursor from a previous response")] = None,
+        limit: Annotated[Optional[Annotated[int, Field(le=100, strict=True, ge=1)]], Field(description="Number of results to return (1–100, default 20)")] = None,
+        auth: Annotated[Optional[StrictStr], Field(description="Read-only auth (alternative to header authorization)")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -2789,18 +2810,18 @@ class AccountApi:
     ) -> RESTResponseType:
         """leases
 
-        Get leases
+        Returns paginated lease entries for an account, most recent first. Supports read-only auth via signature/account_index/timestamp query params.
 
-        :param account_index: (required)
+        :param account_index: Account index to fetch leases for (required)
         :type account_index: int
-        :param authorization:  make required after integ is done
+        :param authorization: API token authorization
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
-        :param cursor:
+        :param cursor: Pagination cursor from a previous response
         :type cursor: str
-        :param limit:
+        :param limit: Number of results to return (1–100, default 20)
         :type limit: int
+        :param auth: Read-only auth (alternative to header authorization)
+        :type auth: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -2826,9 +2847,9 @@ class AccountApi:
         _param = self._leases_serialize(
             account_index=account_index,
             authorization=authorization,
-            auth=auth,
             cursor=cursor,
             limit=limit,
+            auth=auth,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -2850,9 +2871,9 @@ class AccountApi:
         self,
         account_index,
         authorization,
-        auth,
         cursor,
         limit,
+        auth,
         _request_auth,
         _content_type,
         _headers,
@@ -2873,14 +2894,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if account_index is not None:
             
             _query_params.append(('account_index', account_index))
@@ -2893,7 +2906,13 @@ class AccountApi:
             
             _query_params.append(('limit', limit))
             
+        if auth is not None:
+            
+            _query_params.append(('auth', auth))
+            
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -2931,10 +2950,9 @@ class AccountApi:
 
     async def liquidations(
         self,
+        authorization: StrictStr,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
@@ -2954,14 +2972,12 @@ class AccountApi:
 
         Get liquidation infos
 
+        :param authorization: (required)
+        :type authorization: str
         :param account_index: (required)
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
@@ -2989,10 +3005,9 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._liquidations_serialize(
+            authorization=authorization,
             account_index=account_index,
             limit=limit,
-            authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             _request_auth=_request_auth,
@@ -3018,10 +3033,9 @@ class AccountApi:
 
     async def liquidations_with_http_info(
         self,
+        authorization: StrictStr,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
@@ -3041,14 +3055,12 @@ class AccountApi:
 
         Get liquidation infos
 
+        :param authorization: (required)
+        :type authorization: str
         :param account_index: (required)
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
@@ -3076,10 +3088,9 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._liquidations_serialize(
+            authorization=authorization,
             account_index=account_index,
             limit=limit,
-            authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             _request_auth=_request_auth,
@@ -3105,10 +3116,9 @@ class AccountApi:
 
     async def liquidations_without_preload_content(
         self,
+        authorization: StrictStr,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         _request_timeout: Union[
@@ -3128,14 +3138,12 @@ class AccountApi:
 
         Get liquidation infos
 
+        :param authorization: (required)
+        :type authorization: str
         :param account_index: (required)
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
-        :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
@@ -3163,10 +3171,9 @@ class AccountApi:
         """ # noqa: E501
 
         _param = self._liquidations_serialize(
+            authorization=authorization,
             account_index=account_index,
             limit=limit,
-            authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             _request_auth=_request_auth,
@@ -3188,10 +3195,9 @@ class AccountApi:
 
     def _liquidations_serialize(
         self,
+        authorization,
         account_index,
         limit,
-        authorization,
-        auth,
         market_id,
         cursor,
         _request_auth,
@@ -3214,14 +3220,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if account_index is not None:
             
             _query_params.append(('account_index', account_index))
@@ -3239,6 +3237,8 @@ class AccountApi:
             _query_params.append(('limit', limit))
             
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -3276,10 +3276,10 @@ class AccountApi:
 
     async def lit_lease(
         self,
-        tx_info: StrictStr,
-        lease_amount: StrictStr,
-        duration_days: StrictInt,
-        authorization: Optional[StrictStr] = None,
+        tx_info: Annotated[StrictStr, Field(description="Signed transaction info (JSON with L2 signature, L1 signature, etc.)")],
+        lease_amount: Annotated[StrictStr, Field(description="Amount of LIT to lease in raw units (1 LIT = 100000000)")],
+        duration_days: Annotated[StrictInt, Field(description="Lease duration in days. Must match one of the available lease options.")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3295,15 +3295,15 @@ class AccountApi:
     ) -> TxHash:
         """litLease
 
-        Submit LIT lease transfer
+        Submit a LIT lease transfer. The server calculates the required fee based on lease_amount and duration_days, then executes the transfer. Fee formula (integer arithmetic): fee = lease_amount × (annual_rate × 100) × duration_days / (360 × 10000).
 
-        :param tx_info: (required)
+        :param tx_info: Signed transaction info (JSON with L2 signature, L1 signature, etc.) (required)
         :type tx_info: str
-        :param lease_amount: (required)
+        :param lease_amount: Amount of LIT to lease in raw units (1 LIT = 100000000) (required)
         :type lease_amount: str
-        :param duration_days: (required)
+        :param duration_days: Lease duration in days. Must match one of the available lease options. (required)
         :type duration_days: int
-        :param authorization:
+        :param authorization: API token authorization
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -3355,10 +3355,10 @@ class AccountApi:
 
     async def lit_lease_with_http_info(
         self,
-        tx_info: StrictStr,
-        lease_amount: StrictStr,
-        duration_days: StrictInt,
-        authorization: Optional[StrictStr] = None,
+        tx_info: Annotated[StrictStr, Field(description="Signed transaction info (JSON with L2 signature, L1 signature, etc.)")],
+        lease_amount: Annotated[StrictStr, Field(description="Amount of LIT to lease in raw units (1 LIT = 100000000)")],
+        duration_days: Annotated[StrictInt, Field(description="Lease duration in days. Must match one of the available lease options.")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3374,15 +3374,15 @@ class AccountApi:
     ) -> ApiResponse[TxHash]:
         """litLease
 
-        Submit LIT lease transfer
+        Submit a LIT lease transfer. The server calculates the required fee based on lease_amount and duration_days, then executes the transfer. Fee formula (integer arithmetic): fee = lease_amount × (annual_rate × 100) × duration_days / (360 × 10000).
 
-        :param tx_info: (required)
+        :param tx_info: Signed transaction info (JSON with L2 signature, L1 signature, etc.) (required)
         :type tx_info: str
-        :param lease_amount: (required)
+        :param lease_amount: Amount of LIT to lease in raw units (1 LIT = 100000000) (required)
         :type lease_amount: str
-        :param duration_days: (required)
+        :param duration_days: Lease duration in days. Must match one of the available lease options. (required)
         :type duration_days: int
-        :param authorization:
+        :param authorization: API token authorization
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -3434,10 +3434,10 @@ class AccountApi:
 
     async def lit_lease_without_preload_content(
         self,
-        tx_info: StrictStr,
-        lease_amount: StrictStr,
-        duration_days: StrictInt,
-        authorization: Optional[StrictStr] = None,
+        tx_info: Annotated[StrictStr, Field(description="Signed transaction info (JSON with L2 signature, L1 signature, etc.)")],
+        lease_amount: Annotated[StrictStr, Field(description="Amount of LIT to lease in raw units (1 LIT = 100000000)")],
+        duration_days: Annotated[StrictInt, Field(description="Lease duration in days. Must match one of the available lease options.")],
+        authorization: Annotated[Optional[StrictStr], Field(description="API token authorization")] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -3453,15 +3453,15 @@ class AccountApi:
     ) -> RESTResponseType:
         """litLease
 
-        Submit LIT lease transfer
+        Submit a LIT lease transfer. The server calculates the required fee based on lease_amount and duration_days, then executes the transfer. Fee formula (integer arithmetic): fee = lease_amount × (annual_rate × 100) × duration_days / (360 × 10000).
 
-        :param tx_info: (required)
+        :param tx_info: Signed transaction info (JSON with L2 signature, L1 signature, etc.) (required)
         :type tx_info: str
-        :param lease_amount: (required)
+        :param lease_amount: Amount of LIT to lease in raw units (1 LIT = 100000000) (required)
         :type lease_amount: str
-        :param duration_days: (required)
+        :param duration_days: Lease duration in days. Must match one of the available lease options. (required)
         :type duration_days: int
-        :param authorization:
+        :param authorization: API token authorization
         :type authorization: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -3561,7 +3561,7 @@ class AccountApi:
             _default_content_type = (
                 self.api_client.select_header_content_type(
                     [
-                        'multipart/form-data'
+                        'application/x-www-form-urlencoded'
                     ]
                 )
             )
@@ -3590,6 +3590,300 @@ class AccountApi:
 
 
 
+    async def partner_stats(
+        self,
+        account_index: StrictInt,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> PartnerStats:
+        """partnerStats
+
+        Get partner stats. If timestamps are not provided, all-time stats will be returned.
+
+        :param account_index: (required)
+        :type account_index: int
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._partner_stats_serialize(
+            account_index=account_index,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "PartnerStats",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def partner_stats_with_http_info(
+        self,
+        account_index: StrictInt,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[PartnerStats]:
+        """partnerStats
+
+        Get partner stats. If timestamps are not provided, all-time stats will be returned.
+
+        :param account_index: (required)
+        :type account_index: int
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._partner_stats_serialize(
+            account_index=account_index,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "PartnerStats",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def partner_stats_without_preload_content(
+        self,
+        account_index: StrictInt,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """partnerStats
+
+        Get partner stats. If timestamps are not provided, all-time stats will be returned.
+
+        :param account_index: (required)
+        :type account_index: int
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._partner_stats_serialize(
+            account_index=account_index,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "PartnerStats",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _partner_stats_serialize(
+        self,
+        account_index,
+        start_timestamp,
+        end_timestamp,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        if account_index is not None:
+            
+            _query_params.append(('account_index', account_index))
+            
+        if start_timestamp is not None:
+            
+            _query_params.append(('start_timestamp', start_timestamp))
+            
+        if end_timestamp is not None:
+            
+            _query_params.append(('end_timestamp', end_timestamp))
+            
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/api/v1/partnerStats',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
     async def pnl(
         self,
         by: StrictStr,
@@ -3598,8 +3892,7 @@ class AccountApi:
         start_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         end_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         count_back: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         ignore_transfers: Optional[StrictBool] = None,
         _request_timeout: Union[
             None,
@@ -3630,10 +3923,8 @@ class AccountApi:
         :type end_timestamp: int
         :param count_back: (required)
         :type count_back: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param ignore_transfers:
         :type ignore_transfers: bool
         :param _request_timeout: timeout setting for this request. If one
@@ -3666,7 +3957,6 @@ class AccountApi:
             end_timestamp=end_timestamp,
             count_back=count_back,
             authorization=authorization,
-            auth=auth,
             ignore_transfers=ignore_transfers,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3697,8 +3987,7 @@ class AccountApi:
         start_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         end_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         count_back: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         ignore_transfers: Optional[StrictBool] = None,
         _request_timeout: Union[
             None,
@@ -3729,10 +4018,8 @@ class AccountApi:
         :type end_timestamp: int
         :param count_back: (required)
         :type count_back: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param ignore_transfers:
         :type ignore_transfers: bool
         :param _request_timeout: timeout setting for this request. If one
@@ -3765,7 +4052,6 @@ class AccountApi:
             end_timestamp=end_timestamp,
             count_back=count_back,
             authorization=authorization,
-            auth=auth,
             ignore_transfers=ignore_transfers,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3796,8 +4082,7 @@ class AccountApi:
         start_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         end_timestamp: Annotated[int, Field(le=5000000000000, strict=True, ge=0)],
         count_back: StrictInt,
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         ignore_transfers: Optional[StrictBool] = None,
         _request_timeout: Union[
             None,
@@ -3828,10 +4113,8 @@ class AccountApi:
         :type end_timestamp: int
         :param count_back: (required)
         :type count_back: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param ignore_transfers:
         :type ignore_transfers: bool
         :param _request_timeout: timeout setting for this request. If one
@@ -3864,7 +4147,6 @@ class AccountApi:
             end_timestamp=end_timestamp,
             count_back=count_back,
             authorization=authorization,
-            auth=auth,
             ignore_transfers=ignore_transfers,
             _request_auth=_request_auth,
             _content_type=_content_type,
@@ -3892,7 +4174,6 @@ class AccountApi:
         end_timestamp,
         count_back,
         authorization,
-        auth,
         ignore_transfers,
         _request_auth,
         _content_type,
@@ -3914,14 +4195,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if by is not None:
             
             _query_params.append(('by', by))
@@ -3951,6 +4224,8 @@ class AccountApi:
             _query_params.append(('ignore_transfers', ignore_transfers))
             
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -3990,11 +4265,12 @@ class AccountApi:
         self,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         side: Optional[StrictStr] = None,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4016,16 +4292,18 @@ class AccountApi:
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
         :type cursor: str
         :param side:
         :type side: str
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4052,10 +4330,11 @@ class AccountApi:
             account_index=account_index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             side=side,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4081,11 +4360,12 @@ class AccountApi:
         self,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         side: Optional[StrictStr] = None,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4107,16 +4387,18 @@ class AccountApi:
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
         :type cursor: str
         :param side:
         :type side: str
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4143,10 +4425,11 @@ class AccountApi:
             account_index=account_index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             side=side,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4172,11 +4455,12 @@ class AccountApi:
         self,
         account_index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         market_id: Optional[StrictInt] = None,
         cursor: Optional[StrictStr] = None,
         side: Optional[StrictStr] = None,
+        start_timestamp: Optional[StrictInt] = None,
+        end_timestamp: Optional[StrictInt] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -4198,16 +4482,18 @@ class AccountApi:
         :type account_index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param market_id:
         :type market_id: int
         :param cursor:
         :type cursor: str
         :param side:
         :type side: str
+        :param start_timestamp:
+        :type start_timestamp: int
+        :param end_timestamp:
+        :type end_timestamp: int
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
                                  timeout. It can also be a pair (tuple) of
@@ -4234,10 +4520,11 @@ class AccountApi:
             account_index=account_index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             market_id=market_id,
             cursor=cursor,
             side=side,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
             _request_auth=_request_auth,
             _content_type=_content_type,
             _headers=_headers,
@@ -4260,10 +4547,11 @@ class AccountApi:
         account_index,
         limit,
         authorization,
-        auth,
         market_id,
         cursor,
         side,
+        start_timestamp,
+        end_timestamp,
         _request_auth,
         _content_type,
         _headers,
@@ -4284,14 +4572,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if account_index is not None:
             
             _query_params.append(('account_index', account_index))
@@ -4312,7 +4592,17 @@ class AccountApi:
             
             _query_params.append(('side', side))
             
+        if start_timestamp is not None:
+            
+            _query_params.append(('start_timestamp', start_timestamp))
+            
+        if end_timestamp is not None:
+            
+            _query_params.append(('end_timestamp', end_timestamp))
+            
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -4352,8 +4642,7 @@ class AccountApi:
         self,
         index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         filter: Optional[StrictStr] = None,
         account_index: Optional[StrictInt] = None,
         _request_timeout: Union[
@@ -4371,16 +4660,14 @@ class AccountApi:
     ) -> RespPublicPoolsMetadata:
         """publicPoolsMetadata
 
-        Get public pools metadata
+        Get public pools metadata. `auth` is required in case you specify an account_index. You will see public pools with an index that starts an n-1 of the one you specify. To see staking pools, use `filter=stake`
 
         :param index: (required)
         :type index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param filter:
         :type filter: str
         :param account_index:
@@ -4411,7 +4698,6 @@ class AccountApi:
             index=index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             filter=filter,
             account_index=account_index,
             _request_auth=_request_auth,
@@ -4439,8 +4725,7 @@ class AccountApi:
         self,
         index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         filter: Optional[StrictStr] = None,
         account_index: Optional[StrictInt] = None,
         _request_timeout: Union[
@@ -4458,16 +4743,14 @@ class AccountApi:
     ) -> ApiResponse[RespPublicPoolsMetadata]:
         """publicPoolsMetadata
 
-        Get public pools metadata
+        Get public pools metadata. `auth` is required in case you specify an account_index. You will see public pools with an index that starts an n-1 of the one you specify. To see staking pools, use `filter=stake`
 
         :param index: (required)
         :type index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param filter:
         :type filter: str
         :param account_index:
@@ -4498,7 +4781,6 @@ class AccountApi:
             index=index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             filter=filter,
             account_index=account_index,
             _request_auth=_request_auth,
@@ -4526,8 +4808,7 @@ class AccountApi:
         self,
         index: StrictInt,
         limit: Annotated[int, Field(le=100, strict=True, ge=1)],
-        authorization: Annotated[Optional[StrictStr], Field(description=" make required after integ is done")] = None,
-        auth: Annotated[Optional[StrictStr], Field(description=" made optional to support header auth clients")] = None,
+        authorization: Optional[StrictStr] = None,
         filter: Optional[StrictStr] = None,
         account_index: Optional[StrictInt] = None,
         _request_timeout: Union[
@@ -4545,16 +4826,14 @@ class AccountApi:
     ) -> RESTResponseType:
         """publicPoolsMetadata
 
-        Get public pools metadata
+        Get public pools metadata. `auth` is required in case you specify an account_index. You will see public pools with an index that starts an n-1 of the one you specify. To see staking pools, use `filter=stake`
 
         :param index: (required)
         :type index: int
         :param limit: (required)
         :type limit: int
-        :param authorization:  make required after integ is done
+        :param authorization:
         :type authorization: str
-        :param auth:  made optional to support header auth clients
-        :type auth: str
         :param filter:
         :type filter: str
         :param account_index:
@@ -4585,7 +4864,6 @@ class AccountApi:
             index=index,
             limit=limit,
             authorization=authorization,
-            auth=auth,
             filter=filter,
             account_index=account_index,
             _request_auth=_request_auth,
@@ -4610,7 +4888,6 @@ class AccountApi:
         index,
         limit,
         authorization,
-        auth,
         filter,
         account_index,
         _request_auth,
@@ -4633,14 +4910,6 @@ class AccountApi:
 
         # process the path parameters
         # process the query parameters
-        if authorization is not None:
-            
-            _query_params.append(('authorization', authorization))
-            
-        if auth is not None:
-            
-            _query_params.append(('auth', auth))
-            
         if filter is not None:
             
             _query_params.append(('filter', filter))
@@ -4658,6 +4927,8 @@ class AccountApi:
             _query_params.append(('account_index', account_index))
             
         # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
         # process the form parameters
         # process the body parameter
 
@@ -4693,6 +4964,2232 @@ class AccountApi:
 
 
 
+    async def referral_user_referrals(
+        self,
+        l1_address: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        auth: Optional[StrictStr] = None,
+        stats_start_timestamp: Optional[StrictInt] = None,
+        stats_end_timestamp: Optional[StrictInt] = None,
+        limit: Optional[Annotated[int, Field(le=300, strict=True, ge=1)]] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> UserReferrals:
+        """userReferrals
+
+        Get user referrals
+
+        :param l1_address: (required)
+        :type l1_address: str
+        :param authorization:
+        :type authorization: str
+        :param cursor:
+        :type cursor: str
+        :param auth:
+        :type auth: str
+        :param stats_start_timestamp:
+        :type stats_start_timestamp: int
+        :param stats_end_timestamp:
+        :type stats_end_timestamp: int
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._referral_user_referrals_serialize(
+            l1_address=l1_address,
+            authorization=authorization,
+            cursor=cursor,
+            auth=auth,
+            stats_start_timestamp=stats_start_timestamp,
+            stats_end_timestamp=stats_end_timestamp,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "UserReferrals",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def referral_user_referrals_with_http_info(
+        self,
+        l1_address: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        auth: Optional[StrictStr] = None,
+        stats_start_timestamp: Optional[StrictInt] = None,
+        stats_end_timestamp: Optional[StrictInt] = None,
+        limit: Optional[Annotated[int, Field(le=300, strict=True, ge=1)]] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[UserReferrals]:
+        """userReferrals
+
+        Get user referrals
+
+        :param l1_address: (required)
+        :type l1_address: str
+        :param authorization:
+        :type authorization: str
+        :param cursor:
+        :type cursor: str
+        :param auth:
+        :type auth: str
+        :param stats_start_timestamp:
+        :type stats_start_timestamp: int
+        :param stats_end_timestamp:
+        :type stats_end_timestamp: int
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._referral_user_referrals_serialize(
+            l1_address=l1_address,
+            authorization=authorization,
+            cursor=cursor,
+            auth=auth,
+            stats_start_timestamp=stats_start_timestamp,
+            stats_end_timestamp=stats_end_timestamp,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "UserReferrals",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def referral_user_referrals_without_preload_content(
+        self,
+        l1_address: StrictStr,
+        authorization: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        auth: Optional[StrictStr] = None,
+        stats_start_timestamp: Optional[StrictInt] = None,
+        stats_end_timestamp: Optional[StrictInt] = None,
+        limit: Optional[Annotated[int, Field(le=300, strict=True, ge=1)]] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """userReferrals
+
+        Get user referrals
+
+        :param l1_address: (required)
+        :type l1_address: str
+        :param authorization:
+        :type authorization: str
+        :param cursor:
+        :type cursor: str
+        :param auth:
+        :type auth: str
+        :param stats_start_timestamp:
+        :type stats_start_timestamp: int
+        :param stats_end_timestamp:
+        :type stats_end_timestamp: int
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._referral_user_referrals_serialize(
+            l1_address=l1_address,
+            authorization=authorization,
+            cursor=cursor,
+            auth=auth,
+            stats_start_timestamp=stats_start_timestamp,
+            stats_end_timestamp=stats_end_timestamp,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "UserReferrals",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _referral_user_referrals_serialize(
+        self,
+        l1_address,
+        authorization,
+        cursor,
+        auth,
+        stats_start_timestamp,
+        stats_end_timestamp,
+        limit,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        if l1_address is not None:
+            
+            _query_params.append(('l1_address', l1_address))
+            
+        if cursor is not None:
+            
+            _query_params.append(('cursor', cursor))
+            
+        if auth is not None:
+            
+            _query_params.append(('auth', auth))
+            
+        if stats_start_timestamp is not None:
+            
+            _query_params.append(('stats_start_timestamp', stats_start_timestamp))
+            
+        if stats_end_timestamp is not None:
+            
+            _query_params.append(('stats_end_timestamp', stats_end_timestamp))
+            
+        if limit is not None:
+            
+            _query_params.append(('limit', limit))
+            
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/api/v1/referral/userReferrals',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def rfq_create(
+        self,
+        authorization: StrictStr,
+        market_index: StrictInt,
+        direction: StrictInt,
+        base_amount: Optional[StrictStr] = None,
+        quote_amount: Optional[StrictStr] = None,
+        metadata: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespCreateRFQ:
+        """rfq_create
+
+        Create RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param market_index: (required)
+        :type market_index: int
+        :param direction: (required)
+        :type direction: int
+        :param base_amount:
+        :type base_amount: str
+        :param quote_amount:
+        :type quote_amount: str
+        :param metadata:
+        :type metadata: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_create_serialize(
+            authorization=authorization,
+            market_index=market_index,
+            direction=direction,
+            base_amount=base_amount,
+            quote_amount=quote_amount,
+            metadata=metadata,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespCreateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def rfq_create_with_http_info(
+        self,
+        authorization: StrictStr,
+        market_index: StrictInt,
+        direction: StrictInt,
+        base_amount: Optional[StrictStr] = None,
+        quote_amount: Optional[StrictStr] = None,
+        metadata: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespCreateRFQ]:
+        """rfq_create
+
+        Create RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param market_index: (required)
+        :type market_index: int
+        :param direction: (required)
+        :type direction: int
+        :param base_amount:
+        :type base_amount: str
+        :param quote_amount:
+        :type quote_amount: str
+        :param metadata:
+        :type metadata: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_create_serialize(
+            authorization=authorization,
+            market_index=market_index,
+            direction=direction,
+            base_amount=base_amount,
+            quote_amount=quote_amount,
+            metadata=metadata,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespCreateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def rfq_create_without_preload_content(
+        self,
+        authorization: StrictStr,
+        market_index: StrictInt,
+        direction: StrictInt,
+        base_amount: Optional[StrictStr] = None,
+        quote_amount: Optional[StrictStr] = None,
+        metadata: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """rfq_create
+
+        Create RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param market_index: (required)
+        :type market_index: int
+        :param direction: (required)
+        :type direction: int
+        :param base_amount:
+        :type base_amount: str
+        :param quote_amount:
+        :type quote_amount: str
+        :param metadata:
+        :type metadata: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_create_serialize(
+            authorization=authorization,
+            market_index=market_index,
+            direction=direction,
+            base_amount=base_amount,
+            quote_amount=quote_amount,
+            metadata=metadata,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespCreateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _rfq_create_serialize(
+        self,
+        authorization,
+        market_index,
+        direction,
+        base_amount,
+        quote_amount,
+        metadata,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        if market_index is not None:
+            _form_params.append(('market_index', market_index))
+        if base_amount is not None:
+            _form_params.append(('base_amount', base_amount))
+        if quote_amount is not None:
+            _form_params.append(('quote_amount', quote_amount))
+        if direction is not None:
+            _form_params.append(('direction', direction))
+        if metadata is not None:
+            _form_params.append(('metadata', metadata))
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/x-www-form-urlencoded'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/api/v1/rfq/create',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def rfq_get(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespGetRFQ:
+        """rfq_get
+
+        Get RFQ by ID
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_get_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespGetRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def rfq_get_with_http_info(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespGetRFQ]:
+        """rfq_get
+
+        Get RFQ by ID
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_get_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespGetRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def rfq_get_without_preload_content(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """rfq_get
+
+        Get RFQ by ID
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_get_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespGetRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _rfq_get_serialize(
+        self,
+        authorization,
+        rfq_id,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        if rfq_id is not None:
+            
+            _query_params.append(('rfq_id', rfq_id))
+            
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/api/v1/rfq/get',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def rfq_list(
+        self,
+        authorization: StrictStr,
+        account_index: Optional[StrictInt] = None,
+        status: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespListRFQs:
+        """rfq_list
+
+        List RFQs
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index:
+        :type account_index: int
+        :param status:
+        :type status: str
+        :param cursor:
+        :type cursor: str
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_list_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            status=status,
+            cursor=cursor,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespListRFQs",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def rfq_list_with_http_info(
+        self,
+        authorization: StrictStr,
+        account_index: Optional[StrictInt] = None,
+        status: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespListRFQs]:
+        """rfq_list
+
+        List RFQs
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index:
+        :type account_index: int
+        :param status:
+        :type status: str
+        :param cursor:
+        :type cursor: str
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_list_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            status=status,
+            cursor=cursor,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespListRFQs",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def rfq_list_without_preload_content(
+        self,
+        authorization: StrictStr,
+        account_index: Optional[StrictInt] = None,
+        status: Optional[StrictStr] = None,
+        cursor: Optional[StrictStr] = None,
+        limit: Optional[StrictInt] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """rfq_list
+
+        List RFQs
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index:
+        :type account_index: int
+        :param status:
+        :type status: str
+        :param cursor:
+        :type cursor: str
+        :param limit:
+        :type limit: int
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_list_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            status=status,
+            cursor=cursor,
+            limit=limit,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespListRFQs",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _rfq_list_serialize(
+        self,
+        authorization,
+        account_index,
+        status,
+        cursor,
+        limit,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        if account_index is not None:
+            
+            _query_params.append(('account_index', account_index))
+            
+        if status is not None:
+            
+            _query_params.append(('status', status))
+            
+        if cursor is not None:
+            
+            _query_params.append(('cursor', cursor))
+            
+        if limit is not None:
+            
+            _query_params.append(('limit', limit))
+            
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='GET',
+            resource_path='/api/v1/rfq/list',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def rfq_respond(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespRespondToRFQ:
+        """rfq_respond
+
+        Respond to RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_respond_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespRespondToRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def rfq_respond_with_http_info(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespRespondToRFQ]:
+        """rfq_respond
+
+        Respond to RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_respond_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespRespondToRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def rfq_respond_without_preload_content(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """rfq_respond
+
+        Respond to RFQ
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_respond_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespRespondToRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _rfq_respond_serialize(
+        self,
+        authorization,
+        rfq_id,
+        status,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        if rfq_id is not None:
+            _form_params.append(('rfq_id', rfq_id))
+        if status is not None:
+            _form_params.append(('status', status))
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/x-www-form-urlencoded'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/api/v1/rfq/respond',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def rfq_update(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespUpdateRFQ:
+        """rfq_update
+
+        Update RFQ status
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_update_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespUpdateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def rfq_update_with_http_info(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespUpdateRFQ]:
+        """rfq_update
+
+        Update RFQ status
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_update_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespUpdateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def rfq_update_without_preload_content(
+        self,
+        authorization: StrictStr,
+        rfq_id: StrictInt,
+        status: StrictStr,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """rfq_update
+
+        Update RFQ status
+
+        :param authorization: (required)
+        :type authorization: str
+        :param rfq_id: (required)
+        :type rfq_id: int
+        :param status: (required)
+        :type status: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._rfq_update_serialize(
+            authorization=authorization,
+            rfq_id=rfq_id,
+            status=status,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespUpdateRFQ",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _rfq_update_serialize(
+        self,
+        authorization,
+        rfq_id,
+        status,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        if rfq_id is not None:
+            _form_params.append(('rfq_id', rfq_id))
+        if status is not None:
+            _form_params.append(('status', status))
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/x-www-form-urlencoded'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/api/v1/rfq/update',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    async def set_maker_only_api_keys(
+        self,
+        authorization: StrictStr,
+        account_index: StrictInt,
+        api_key_indexes: Annotated[StrictStr, Field(description="JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions.")],
+        auth: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RespSetMakerOnlyApiKeys:
+        """setMakerOnlyApiKeys
+
+        Set maker-only API key indexes. This replaces the current list; pass all indexes you want marked as maker-only. Pass [] to clear all maker-only restrictions.
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
+        :param api_key_indexes: JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions. (required)
+        :type api_key_indexes: str
+        :param auth:
+        :type auth: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._set_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            api_key_indexes=api_key_indexes,
+            auth=auth,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespSetMakerOnlyApiKeys",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    async def set_maker_only_api_keys_with_http_info(
+        self,
+        authorization: StrictStr,
+        account_index: StrictInt,
+        api_key_indexes: Annotated[StrictStr, Field(description="JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions.")],
+        auth: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[RespSetMakerOnlyApiKeys]:
+        """setMakerOnlyApiKeys
+
+        Set maker-only API key indexes. This replaces the current list; pass all indexes you want marked as maker-only. Pass [] to clear all maker-only restrictions.
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
+        :param api_key_indexes: JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions. (required)
+        :type api_key_indexes: str
+        :param auth:
+        :type auth: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._set_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            api_key_indexes=api_key_indexes,
+            auth=auth,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespSetMakerOnlyApiKeys",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        await response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    async def set_maker_only_api_keys_without_preload_content(
+        self,
+        authorization: StrictStr,
+        account_index: StrictInt,
+        api_key_indexes: Annotated[StrictStr, Field(description="JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions.")],
+        auth: Optional[StrictStr] = None,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """setMakerOnlyApiKeys
+
+        Set maker-only API key indexes. This replaces the current list; pass all indexes you want marked as maker-only. Pass [] to clear all maker-only restrictions.
+
+        :param authorization: (required)
+        :type authorization: str
+        :param account_index: (required)
+        :type account_index: int
+        :param api_key_indexes: JSON array string of API key indexes, e.g. \\\"[4,5]\\\". Use [] to clear all maker-only restrictions. (required)
+        :type api_key_indexes: str
+        :param auth:
+        :type auth: str
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._set_maker_only_api_keys_serialize(
+            authorization=authorization,
+            account_index=account_index,
+            api_key_indexes=api_key_indexes,
+            auth=auth,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "RespSetMakerOnlyApiKeys",
+            '400': "ResultCode",
+        }
+        response_data = await self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _set_maker_only_api_keys_serialize(
+        self,
+        authorization,
+        account_index,
+        api_key_indexes,
+        auth,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[str, Union[str, bytes]] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        # process the query parameters
+        # process the header parameters
+        if authorization is not None:
+            _header_params['authorization'] = authorization
+        # process the form parameters
+        if account_index is not None:
+            _form_params.append(('account_index', account_index))
+        if api_key_indexes is not None:
+            _form_params.append(('api_key_indexes', api_key_indexes))
+        if auth is not None:
+            _form_params.append(('auth', auth))
+        # process the body parameter
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/x-www-form-urlencoded', 
+                        'multipart/form-data'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+        ]
+
+        return self.api_client.param_serialize(
+            method='POST',
+            resource_path='/api/v1/setMakerOnlyApiKeys',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
     async def tokens(
         self,
         account_index: StrictInt,
@@ -4712,7 +7209,7 @@ class AccountApi:
     ) -> RespGetApiTokens:
         """tokens
 
-        Get api tokens of an account
+        Get read only auth tokens for an account
 
         :param account_index: (required)
         :type account_index: int
@@ -4783,7 +7280,7 @@ class AccountApi:
     ) -> ApiResponse[RespGetApiTokens]:
         """tokens
 
-        Get api tokens of an account
+        Get read only auth tokens for an account
 
         :param account_index: (required)
         :type account_index: int
@@ -4854,7 +7351,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """tokens
 
-        Get api tokens of an account
+        Get read only auth tokens for an account
 
         :param account_index: (required)
         :type account_index: int
@@ -4991,7 +7488,7 @@ class AccountApi:
     ) -> RespPostApiToken:
         """tokens_create
 
-        Create api token
+        Create an API token for read-only access
 
         :param name: (required)
         :type name: str
@@ -5078,7 +7575,7 @@ class AccountApi:
     ) -> ApiResponse[RespPostApiToken]:
         """tokens_create
 
-        Create api token
+        Create an API token for read-only access
 
         :param name: (required)
         :type name: str
@@ -5165,7 +7662,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """tokens_create
 
-        Create api token
+        Create an API token for read-only access
 
         :param name: (required)
         :type name: str
@@ -5285,7 +7782,7 @@ class AccountApi:
             _default_content_type = (
                 self.api_client.select_header_content_type(
                     [
-                        'multipart/form-data'
+                        'application/x-www-form-urlencoded'
                     ]
                 )
             )
@@ -5334,7 +7831,7 @@ class AccountApi:
     ) -> RespRevokeApiToken:
         """tokens_revoke
 
-        Revoke api token
+        Revoke read only auth token for an account
 
         :param token_id: (required)
         :type token_id: int
@@ -5409,7 +7906,7 @@ class AccountApi:
     ) -> ApiResponse[RespRevokeApiToken]:
         """tokens_revoke
 
-        Revoke api token
+        Revoke read only auth token for an account
 
         :param token_id: (required)
         :type token_id: int
@@ -5484,7 +7981,7 @@ class AccountApi:
     ) -> RESTResponseType:
         """tokens_revoke
 
-        Revoke api token
+        Revoke read only auth token for an account
 
         :param token_id: (required)
         :type token_id: int
@@ -5586,7 +8083,7 @@ class AccountApi:
             _default_content_type = (
                 self.api_client.select_header_content_type(
                     [
-                        'multipart/form-data'
+                        'application/x-www-form-urlencoded'
                     ]
                 )
             )
