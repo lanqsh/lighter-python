@@ -108,7 +108,7 @@ async def fetch_active_orders(
             resp = await order_api.account_active_orders(
                 account_index=account_index,
                 market_id=market_id,
-                auth=auth_token,
+                authorization=auth_token,
             )
             return resp.orders or []
         except Exception as exc:
@@ -187,7 +187,7 @@ async def fetch_recent_trades(
                 account_index=account_index,
                 market_id=market_id,
                 sort_dir="desc",
-                auth=auth_token,
+                authorization=auth_token,
             )
             return resp.trades or []
         except Exception as exc:
